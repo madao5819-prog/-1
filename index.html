@@ -170,7 +170,8 @@
 <div class="overlay" id="startScreen">
   <img class="face" src="face.jpg" alt="">
   <h1>ビールよけ</h1>
-  <p>あいつがビールをかけてくる！<br>10杯よけきればクリア！<br>1杯でも浴びたらゲームオーバー</p>
+  <p>あいつがビールをかけてくる！<br>10杯よけるごとにレベルアップ<br>1杯でも浴びたらゲームオーバー</p>
+  <p class="small">⚠ 赤いエリアは「範囲攻撃」。すぐ逃げろ！</p>
   <p class="small">◀ ▶ ボタンを押す or 画面をなぞって動かす</p>
   <p class="best" id="bestText"></p>
   <button id="startBtn">スタート</button>
@@ -200,7 +201,9 @@
 (() => {
   const W = 400;
   let H = 640;
-  const GOAL = 10;
+  const PER_LEVEL = 10;
+  const LEVEL_NAMES = ['ほろ酔い', '一杯目', 'ほろほろ', '二次会', 'ハシゴ酒', '泥酔', '記憶なし', '地獄の飲み会', 'クソゲー'];
+  const levelName = L => L <= LEVEL_NAMES.length ? LEVEL_NAMES[L - 1] : 'クソゲー極';
 
   const $ = id => document.getElementById(id);
   const canvas = $('game');
@@ -217,19 +220,41 @@
   // ---------- 記録 ----------
   const BEST_KEY = 'beer-dodge-best';
   function loadBest() {
-    try { return JSON.parse(localStorage.getItem(BEST_KEY)) || { dodged: 0, clears: 0 }; }
-    catch (_) { return { dodged: 0, clears: 0 }; }
+    try {
+      const b = JSON.parse(localStorage.getItem(BEST_KEY)) || {};
+      return { score: b.score || b.dodged || 0, level: b.level || 1 };
+    } catch (_) { return { score: 0, level: 1 }; }
   }
   function saveBest(b) {
     try { localStorage.setItem(BEST_KEY, JSON.stringify(b)); } catch (_) {}
   }
   let best = loadBest();
   function showBest() {
-    $('bestText').textContent = best.clears > 0
-      ? `クリア回数：${best.clears}回`
-      : (best.dodged > 0 ? `ベスト：${best.dodged} / ${GOAL} 杯よけた` : '');
+    $('bestText').textContent = best.score > 0
+      ? `ベスト：${best.score}杯（Lv.${best.level} ${levelName(best.level)}）`
+      : '';
   }
   showBest();
+
+  // ---------- 難易度 ----------
+  // レベルが上がるほど速く・多く・容赦なくなる。Lv.9 以降はクソゲー。
+  function params(L, inLevel) {
+    return {
+      speed: Math.min(980, 240 + L * 55 + inLevel * 4),
+      interval: Math.max(0.16, 1.3 - L * 0.13),
+      fan: L >= 9 ? 5
+         : L >= 7 ? (Math.random() < 0.5 ? 3 : 5)
+         : L >= 5 ? 3
+         : L >= 3 ? (Math.random() < 0.5 ? 1 : 2)
+         : 1,
+      lead: Math.min(0.9, 0.12 * (L - 1)),
+      bossSpeed: 70 + L * 20,
+      areaInterval: Math.max(1.5, 7.5 - L * 0.65),
+      warn: Math.max(0.42, 1.15 - L * 0.08),
+      playerSpeed: 300 + Math.min(L, 10) * 8,
+      sway: L >= 7 ? Math.min(0.05, (L - 6) * 0.012) : 0,
+    };
+  }
 
   // ---------- 画面サイズ（縦長スマホは画面いっぱいに） ----------
   let scale = 1;
@@ -273,10 +298,13 @@
     try { if (navigator.vibrate) navigator.vibrate(p); } catch (_) {}
   }
   const sfx = {
-    throw: () => beep(500, 0.15, 'triangle', 0.07, -250),
-    dodge: () => { beep(880, 0.08, 'square', 0.04); vibrate(15); },
+    throw: () => beep(500, 0.15, 'triangle', 0.06, -250),
+    dodge: () => { beep(880, 0.06, 'square', 0.03); vibrate(10); },
+    warn: () => { beep(330, 0.12, 'square', 0.05); setTimeout(() => beep(330, 0.12, 'square', 0.05), 160); },
+    pour: () => beep(160, 0.45, 'sawtooth', 0.05, -80),
+    area: () => { beep(1046, 0.1, 'square', 0.04); vibrate(25); },
     splash: () => { beep(200, 0.5, 'sawtooth', 0.08, -150); beep(120, 0.6, 'square', 0.05, -60); vibrate([120, 60, 220]); },
-    clear: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.18, 'square', 0.05), i * 120)); vibrate([40, 40, 40, 40, 120]); },
+    levelUp: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.16, 'square', 0.05), i * 100)); vibrate([30, 30, 30, 30, 80]); },
   };
   function unlockAudio() {
     if (!audio) {
@@ -333,21 +361,31 @@
   // ---------- ゲーム状態 ----------
   let state = 'title';
   let paused = false;
-  let player, boss, beers, particles, dodged, thrown, throwTimer, shake, time, hitBeer, endTimer, popups;
+  let player, bosses, beers, areas, particles, popups;
+  let dodged, level, throwTimer, areaTimer, levelPause, banner, shake, time, endTimer, deathBy, nextBoss;
+
+  function makeBoss(x, dir) {
+    return { x, y: 92, r: 58, dir, windup: 0 };
+  }
 
   function reset() {
-    player = { x: W / 2, y: H - 70, w: 34, h: 56, speed: 300, face: 1, step: 0, hurt: false };
-    boss = { x: W / 2, y: 92, r: 58, dir: 1, speed: 70, windup: 0 };
+    player = { x: W / 2, y: H - 70, w: 34, h: 56, face: 1, step: 0, hurt: false };
+    bosses = [makeBoss(W / 2, 1)];
     beers = [];
+    areas = [];
     particles = [];
     popups = [];
     dodged = 0;
-    thrown = 0;
+    level = 1;
     throwTimer = 1.2;
+    areaTimer = 0;
+    levelPause = 0;
+    banner = null;
     shake = 0;
     time = 0;
-    hitBeer = null;
     endTimer = 0;
+    deathBy = '';
+    nextBoss = 0;
   }
 
   function start() {
@@ -359,6 +397,7 @@
     endScreen.classList.add('hidden');
     pauseScreen.classList.add('hidden');
     pauseBtn.classList.add('show');
+    banner = { title: 'Lv.1', sub: levelName(1), life: 1.4 };
   }
 
   function toTitle() {
@@ -389,34 +428,95 @@
   // アプリを切り替えたら自動で一時停止
   document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
 
-  // ---------- ビール ----------
-  function throwBeer() {
-    const i = thrown;
-    thrown++;
-    const speed = 250 + i * 32;
+  // ---------- スコア・レベル ----------
+  function addDodge(text, x, y) {
+    dodged++;
+    popups.push({ x, y, text, life: 0.7 });
+    const newLevel = Math.floor(dodged / PER_LEVEL) + 1;
+    if (newLevel > level) levelUp(newLevel);
+  }
+
+  function levelUp(L) {
+    level = L;
+    levelPause = 1.4;
+    throwTimer = Math.max(throwTimer, 1.4);
+    areaTimer = Math.max(areaTimer, 2.2);
+    banner = { title: `LEVEL UP!  Lv.${L}`, sub: levelName(L), life: 1.8 };
+    sfx.levelUp();
+    // Lv.6 からビールをかけてくる人が2人になる
+    if (L >= 6 && bosses.length < 2) {
+      const b = bosses[0];
+      bosses.push(makeBoss(b.x > W / 2 ? 80 : W - 80, -b.dir));
+      popups.push({ x: W / 2, y: 230, text: 'もう1人きた！', life: 1.6, color: '#d9412b' });
+    }
+  }
+
+  // ---------- 通常攻撃：ビールを投げる ----------
+  function throwVolley(p) {
+    const boss = bosses[nextBoss % bosses.length];
+    nextBoss++;
     const sx = boss.x + (Math.random() - 0.5) * 30;
     const sy = boss.y + 40;
     let tx = player.x + (Math.random() - 0.5) * 50;
-
-    // 後半はプレイヤーの動きを先読みしてくる
-    if (i >= 4 && Math.random() < 0.5) {
+    if (Math.random() < p.lead) {
       const dist = Math.hypot(tx - sx, player.y - sy);
-      tx += inputDir() * player.speed * (dist / speed) * 0.7;
+      tx += inputDir() * p.playerSpeed * (dist / p.speed) * 0.7;
     }
     tx = Math.max(20, Math.min(W - 20, tx));
-
-    const ty = player.y;
-    const d = Math.hypot(tx - sx, ty - sy);
-    beers.push({
-      x: sx, y: sy,
-      vx: (tx - sx) / d * speed,
-      vy: (ty - sy) / d * speed,
-      rot: 0,
-      spin: (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 4),
-      passed: false,
-    });
+    const base = Math.atan2(player.y - sy, tx - sx);
+    const spread = 0.21;
+    for (let k = 0; k < p.fan; k++) {
+      const a = base + (k - (p.fan - 1) / 2) * spread;
+      beers.push({
+        x: sx, y: sy,
+        vx: Math.cos(a) * p.speed,
+        vy: Math.sin(a) * p.speed,
+        rot: 0,
+        spin: (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 4),
+      });
+    }
     boss.windup = 0.25;
     sfx.throw();
+  }
+
+  // ---------- 範囲攻撃 ----------
+  // pour: プレイヤー付近に太いビールの滝。gap: 安全地帯以外ぜんぶビール。
+  function startArea(p) {
+    const ps = p.playerSpeed;
+    const types = ['pour'];
+    if (level >= 4) types.push('double');
+    if (level >= 5) types.push('gap', 'gap');
+    const type = types[Math.floor(Math.random() * types.length)];
+    let rects = [];
+    let safe = null;
+
+    if (type === 'pour' || type === 'double') {
+      const n = type === 'double' ? 2 : 1;
+      for (let i = 0; i < n; i++) {
+        const w = 110 + Math.random() * Math.min(90, level * 12);
+        const c = i === 0
+          ? player.x + (Math.random() - 0.5) * 60
+          : Math.random() * W;
+        const x1 = Math.max(0, Math.min(W - w, c - w / 2));
+        rects.push([x1, x1 + w]);
+      }
+    } else {
+      const gw = Math.max(70, 120 - level * 5);
+      // 安全地帯は必ず間に合う距離に置く
+      const reach = ps * p.warn * 0.8;
+      let c = player.x + (Math.random() * 2 - 1) * reach;
+      c = Math.max(gw / 2 + 4, Math.min(W - gw / 2 - 4, c));
+      safe = [c - gw / 2, c + gw / 2];
+      rects = [[0, safe[0]], [safe[1], W]];
+    }
+    areas.push({ rects, safe, t: 0, warn: p.warn, active: 0.65, poured: false });
+    sfx.warn();
+  }
+
+  function inArea(a) {
+    // 少しだけ甘めの判定
+    const m = 8;
+    return a.rects.some(([x1, x2]) => player.x > x1 + m && player.x < x2 - m);
   }
 
   function addSplash(x, y, n, big) {
@@ -454,96 +554,123 @@
       p.y += p.vy * dt;
       p.life -= dt;
     }
+    if (particles.length > 500) particles.splice(0, particles.length - 500);
     particles = particles.filter(p => p.life > 0);
     for (const p of popups) { p.y -= 40 * dt; p.life -= dt; }
     popups = popups.filter(p => p.life > 0);
+    if (banner) { banner.life -= dt; if (banner.life <= 0) banner = null; }
 
-    if (state === 'over' || state === 'clear') {
+    if (state === 'over') {
       endTimer += dt;
+      for (const a of areas) a.t += dt;
       return;
     }
     if (state !== 'play') return;
 
+    const p = params(level, dodged % PER_LEVEL);
+
     // プレイヤー
     const move = inputDir();
-    player.x += move * player.speed * dt;
+    player.x += move * p.playerSpeed * dt;
     player.x = Math.max(player.w / 2 + 4, Math.min(W - player.w / 2 - 4, player.x));
     if (move !== 0) { player.face = move; player.step += dt * 14; }
 
-    // ビールを投げる人
-    boss.x += boss.dir * boss.speed * (1 + dodged * 0.08) * dt;
-    if (boss.x > W - boss.r - 10) { boss.x = W - boss.r - 10; boss.dir = -1; }
-    if (boss.x < boss.r + 10) { boss.x = boss.r + 10; boss.dir = 1; }
-    if (boss.windup > 0) boss.windup -= dt;
+    // ビールをかけてくる人
+    for (const b of bosses) {
+      b.x += b.dir * p.bossSpeed * dt;
+      if (b.x > W - b.r - 10) { b.x = W - b.r - 10; b.dir = -1; }
+      if (b.x < b.r + 10) { b.x = b.r + 10; b.dir = 1; }
+      if (b.windup > 0) b.windup -= dt;
+    }
 
-    if (thrown < GOAL) {
-      throwTimer -= dt;
-      if (throwTimer <= 0) {
-        throwBeer();
-        throwTimer = Math.max(0.55, 1.35 - thrown * 0.08) + Math.random() * 0.35;
+    if (levelPause > 0) levelPause -= dt;
+
+    // 通常攻撃
+    throwTimer -= dt;
+    if (throwTimer <= 0 && levelPause <= 0) {
+      throwVolley(p);
+      throwTimer = p.interval * (bosses.length > 1 ? 0.75 : 1) + Math.random() * 0.3;
+    }
+
+    // 範囲攻撃（Lv.2 から）
+    if (level >= 2 && levelPause <= 0) {
+      areaTimer -= dt;
+      const busy = areas.length >= (level >= 8 ? 2 : 1);
+      if (areaTimer <= 0 && !busy) {
+        startArea(p);
+        areaTimer = p.areaInterval + Math.random() * 1.5;
       }
     }
 
+    for (const a of areas) {
+      a.t += dt;
+      if (a.t >= a.warn) {
+        if (!a.poured) { a.poured = true; sfx.pour(); shake = Math.max(shake, 4); }
+        if (inArea(a)) {
+          deathBy = 'ビールの滝に飲まれた…';
+          gameOver();
+          return;
+        }
+        if (Math.random() < 0.6) {
+          const [x1, x2] = a.rects[Math.floor(Math.random() * a.rects.length)];
+          addSplash(x1 + Math.random() * (x2 - x1), H - 30, 2, false);
+        }
+      }
+      if (a.t >= a.warn + a.active) {
+        a.done = true;
+        sfx.area();
+        addDodge('範囲よけた！', player.x, player.y - 70);
+      }
+    }
+    areas = areas.filter(a => !a.done);
+
+    // ビール
     for (const b of beers) {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.rot += b.spin * dt;
-      if (Math.random() < 0.5) {
+      if (Math.random() < 0.4) {
         particles.push({ x: b.x, y: b.y, vx: (Math.random() - 0.5) * 30, vy: -20, life: 0.4, max: 0.4, r: 2 + Math.random() * 2, foam: Math.random() < 0.5 });
       }
-      if (!b.passed && rectHit(b)) {
-        hitBeer = b;
+      if (rectHit(b)) {
+        deathBy = 'ビールを頭からかぶった…';
         gameOver();
         return;
       }
-      if (!b.passed && b.y > player.y + player.h / 2 + 10) {
-        b.passed = true;
-        dodged++;
+      const passed = b.y > player.y + player.h / 2 + 10;
+      const out = b.x < -30 || b.x > W + 30;
+      if (passed || out) {
+        b.gone = true;
         sfx.dodge();
-        popups.push({ x: player.x, y: player.y - 50, text: 'よけた！', life: 0.7 });
-        addSplash(b.x, H - 14, 14, false);
-        if (dodged >= GOAL) { gameClear(); return; }
+        if (passed) addSplash(b.x, H - 14, 8, false);
+        addDodge('よけた！', player.x, player.y - 50);
+        if (state !== 'play') return;
       }
     }
-    beers = beers.filter(b => b.y < H + 40 && b.x > -40 && b.x < W + 40);
-  }
-
-  function finish() {
-    pauseBtn.classList.remove('show');
-    pads.left = pads.right = false;
-    pointerX = null;
-    document.querySelectorAll('.pad').forEach(el => el.classList.remove('on'));
+    beers = beers.filter(b => !b.gone);
   }
 
   function gameOver() {
     state = 'over';
-    finish();
+    pauseBtn.classList.remove('show');
+    pads.left = pads.right = false;
+    pointerX = null;
+    document.querySelectorAll('.pad').forEach(el => el.classList.remove('on'));
     player.hurt = true;
     shake = 14;
     addSplash(player.x, player.y - 20, 90, true);
-    beers = beers.filter(b => b === hitBeer);
     sfx.splash();
-    const newBest = dodged > best.dodged;
-    if (newBest) { best.dodged = dodged; saveBest(best); }
+    const newBest = dodged > best.score;
+    if (newBest) { best = { score: dodged, level }; saveBest(best); }
     setTimeout(() => {
       $('endTitle').textContent = 'ビールまみれ…';
-      $('endText').innerHTML = `よけた数：<b>${dodged}</b> / ${GOAL}${newBest ? '（自己ベスト！）' : ''}<br>カンパーイ！（ずぶ濡れ）`;
+      $('endText').innerHTML =
+        `${deathBy}<br>` +
+        `よけた数：<b>${dodged}</b> 杯${newBest ? '（自己ベスト！）' : ''}<br>` +
+        `到達：<b>Lv.${level} ${levelName(level)}</b><br>` +
+        `<span class="small">ベスト：${best.score}杯（Lv.${best.level}）</span>`;
       endScreen.classList.remove('hidden');
     }, 1100);
-  }
-
-  function gameClear() {
-    state = 'clear';
-    finish();
-    sfx.clear();
-    best.dodged = GOAL;
-    best.clears = (best.clears || 0) + 1;
-    saveBest(best);
-    setTimeout(() => {
-      $('endTitle').textContent = '完全回避！';
-      $('endText').innerHTML = `10杯ぜんぶよけきった！<br>ビールは自分で飲もう 🍺<br><span class="small">クリア ${best.clears} 回目</span>`;
-      endScreen.classList.remove('hidden');
-    }, 900);
   }
 
   // ---------- 描画 ----------
@@ -569,12 +696,13 @@
 
   function drawBackground() {
     const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#f3dfb6');
-    g.addColorStop(1, '#e6c48c');
+    // レベルが上がると店内がだんだん赤く（酔って）くる
+    const heat = Math.min(1, (level - 1) / 8);
+    g.addColorStop(0, `rgb(${243}, ${Math.round(223 - heat * 60)}, ${Math.round(182 - heat * 90)})`);
+    g.addColorStop(1, `rgb(${230}, ${Math.round(196 - heat * 70)}, ${Math.round(140 - heat * 80)})`);
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(-40, -40, W + 80, H + 80);
 
-    // ちょうちん
     for (let i = 0; i < 4; i++) {
       const x = 50 + i * 100;
       const sway = Math.sin(time * 1.5 + i) * 3;
@@ -594,17 +722,75 @@
       ctx.restore();
     }
 
-    // 床
     ctx.fillStyle = '#b07a3f';
-    ctx.fillRect(0, H - 30, W, 30);
+    ctx.fillRect(-40, H - 30, W + 80, 70);
     ctx.fillStyle = '#8c5a28';
     for (let x = 0; x < W; x += 50) ctx.fillRect(x, H - 30, 2, 30);
     ctx.fillStyle = '#c99257';
-    ctx.fillRect(0, H - 30, W, 4);
+    ctx.fillRect(-40, H - 30, W + 80, 4);
   }
 
-  function drawBoss() {
-    const wob = Math.sin(time * 6) * 3;
+  function drawAreas() {
+    const top = 218;
+    for (const a of areas) {
+      if (a.t < a.warn) {
+        // 予告：赤く点滅するエリア
+        const blink = 0.18 + 0.17 * (0.5 + 0.5 * Math.sin(a.t * 30));
+        for (const [x1, x2] of a.rects) {
+          ctx.fillStyle = `rgba(217,65,43,${blink})`;
+          ctx.fillRect(x1, top, x2 - x1, H - 30 - top);
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x1, top, x2 - x1, H - 30 - top);
+          ctx.clip();
+          ctx.strokeStyle = 'rgba(217,65,43,.35)';
+          ctx.lineWidth = 8;
+          const off = (a.t * 80) % 32;
+          for (let s = -H; s < W + H; s += 32) {
+            ctx.beginPath();
+            ctx.moveTo(s + off, top);
+            ctx.lineTo(s + off - (H - top), H);
+            ctx.stroke();
+          }
+          ctx.restore();
+          if (x2 - x1 > 40) outlinedText("⚠", (x1 + x2) / 2, top + 50, 28, '#d9412b');
+        }
+        if (a.safe) {
+          const [g1, g2] = a.safe;
+          ctx.fillStyle = 'rgba(80,190,90,.28)';
+          ctx.fillRect(g1, top, g2 - g1, H - 30 - top);
+          outlinedText('ここ！', (g1 + g2) / 2, H - 120, 18, '#2e8b3e');
+        }
+        // 残り時間バー
+        ctx.fillStyle = '#d9412b';
+        ctx.fillRect(0, top - 6, W * (1 - a.t / a.warn), 4);
+      } else {
+        // 発動：ビールの滝
+        const k = Math.min(1, (a.t - a.warn) / 0.12);
+        for (const [x1, x2] of a.rects) {
+          const g = ctx.createLinearGradient(0, 0, 0, H);
+          g.addColorStop(0, 'rgba(247,183,51,.9)');
+          g.addColorStop(1, 'rgba(217,130,11,.95)');
+          ctx.fillStyle = g;
+          ctx.fillRect(x1, 0, x2 - x1, (H - 30) * k);
+          ctx.fillStyle = 'rgba(255,250,240,.55)';
+          for (let sx = x1 + 6; sx < x2 - 4; sx += 14) {
+            const off = ((a.t * 900) + sx * 7) % 80;
+            for (let sy = -80 + off; sy < (H - 30) * k; sy += 80) ctx.fillRect(sx, sy, 3, 30);
+          }
+          ctx.fillStyle = '#fffaf0';
+          for (let fx = x1; fx < x2; fx += 16) {
+            ctx.beginPath();
+            ctx.arc(fx + 8, H - 32, 9 + Math.sin(time * 20 + fx) * 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+    }
+  }
+
+  function drawBoss(boss) {
+    const wob = Math.sin(time * 6 + boss.x * 0.01) * 3;
     const wind = boss.windup > 0 ? Math.sin(boss.windup * 60) * 4 : 0;
     const x = boss.x + wind, y = boss.y + wob;
 
@@ -635,7 +821,6 @@
       outlinedText('それっ！', right ? x - boss.r - 6 : x + boss.r + 6, y - 10, 18, '#d9412b', right ? 'right' : 'left');
     }
     if (state === 'over') outlinedText('カンパーイ！', x, y + boss.r + 34, 22, '#d9412b');
-    if (state === 'clear') outlinedText('ぐぬぬ…', x, y + boss.r + 34, 20, '#3a2410');
   }
 
   function drawBeer(b) {
@@ -671,14 +856,13 @@
   function drawPlayer() {
     const p = player;
     const leg = Math.sin(p.step) * 6;
-    const jump = state === 'clear' ? Math.abs(Math.sin(endTimer * 8)) * 18 : 0;
 
     ctx.save();
-    ctx.translate(p.x, p.y - jump);
+    ctx.translate(p.x, p.y);
 
     ctx.fillStyle = 'rgba(0,0,0,.18)';
     ctx.beginPath();
-    ctx.ellipse(0, 30 + jump, 18, 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 30, 18, 5, 0, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.strokeStyle = '#2d3a5a';
@@ -696,13 +880,8 @@
     ctx.strokeStyle = '#ffd7b0';
     ctx.lineWidth = 5;
     ctx.beginPath();
-    if (state === 'clear') {
-      ctx.moveTo(-12, -6); ctx.lineTo(-20, -24);
-      ctx.moveTo(12, -6); ctx.lineTo(20, -24);
-    } else {
-      ctx.moveTo(-13, -4); ctx.lineTo(-19, 10 - leg / 2);
-      ctx.moveTo(13, -4); ctx.lineTo(19, 10 + leg / 2);
-    }
+    ctx.moveTo(-13, -4); ctx.lineTo(-19, 10 - leg / 2);
+    ctx.moveTo(13, -4); ctx.lineTo(19, 10 + leg / 2);
     ctx.stroke();
 
     ctx.fillStyle = '#ffd7b0';
@@ -731,9 +910,15 @@
       ctx.strokeStyle = '#3a2410';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      if (state === 'clear') ctx.arc(fx, -21, 4, 0, Math.PI);
-      else { ctx.moveTo(fx - 3, -18); ctx.lineTo(fx + 3, -18); }
+      ctx.moveTo(fx - 3, -18); ctx.lineTo(fx + 3, -18);
       ctx.stroke();
+      // 高レベルでは冷や汗
+      if (level >= 5) {
+        ctx.fillStyle = '#7cc4ff';
+        ctx.beginPath();
+        ctx.ellipse(12, -30 + (time * 30 % 10), 2.5, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     if (p.hurt) {
@@ -764,47 +949,79 @@
   }
 
   function drawHUD() {
-    const label = `よけた ${dodged} / ${GOAL}`;
-    ctx.font = 'bold 16px sans-serif';
-    const tw = ctx.measureText(label).width;
-    ctx.fillStyle = 'rgba(58,36,16,.85)';
-    roundRect(W - tw - 34, 168, tw + 24, 30, 15);
+    // レベル表示
+    const lv = `Lv.${level} ${levelName(level)}`;
+    ctx.font = 'bold 15px sans-serif';
+    const lw = ctx.measureText(lv).width;
+    ctx.fillStyle = level >= 9 ? 'rgba(217,65,43,.9)' : 'rgba(58,36,16,.85)';
+    roundRect(10, 166, lw + 20, 28, 14);
     ctx.fill();
     ctx.fillStyle = '#fff7e6';
     ctx.textAlign = 'left';
-    ctx.fillText(label, W - tw - 22, 189);
+    ctx.fillText(lv, 20, 186);
 
-    for (let i = 0; i < GOAL; i++) {
-      const x = 14 + i * 18;
-      const y = 172;
-      ctx.fillStyle = i < dodged ? '#f2a516' : 'rgba(58,36,16,.25)';
-      roundRect(x, y, 13, 18, 3);
+    // よけた数
+    const label = `よけた ${dodged}`;
+    ctx.font = 'bold 16px sans-serif';
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(58,36,16,.85)';
+    roundRect(W - tw - 34, 166, tw + 24, 28, 14);
+    ctx.fill();
+    ctx.fillStyle = '#fff7e6';
+    ctx.fillText(label, W - tw - 22, 186);
+
+    // 次のレベルまでのジョッキゲージ
+    const inLevel = dodged % PER_LEVEL;
+    for (let i = 0; i < PER_LEVEL; i++) {
+      const x = 12 + i * 13;
+      const y = 200;
+      ctx.fillStyle = i < inLevel ? '#f2a516' : 'rgba(58,36,16,.22)';
+      roundRect(x, y, 9, 12, 2);
       ctx.fill();
-      if (i < dodged) {
-        ctx.fillStyle = '#fffaf0';
-        ctx.fillRect(x, y, 13, 5);
-      }
     }
 
     for (const p of popups) {
       ctx.globalAlpha = Math.min(1, p.life * 2);
-      outlinedText(p.text, p.x, p.y, 16, '#3a8ee6');
+      outlinedText(p.text, p.x, p.y, 16, p.color || '#3a8ee6');
     }
     ctx.globalAlpha = 1;
+
+    if (banner) {
+      const a = Math.min(1, banner.life * 2);
+      const pop = 1 + Math.max(0, banner.life - 1.4) * 0.6;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = 'rgba(43,26,14,.75)';
+      ctx.fillRect(0, H * 0.42 - 44, W, 92);
+      ctx.save();
+      ctx.translate(W / 2, H * 0.42);
+      ctx.scale(pop, pop);
+      outlinedText(banner.title, 0, 0, 30, '#f2a516');
+      outlinedText(banner.sub, 0, 34, 20, level >= 9 ? '#d9412b' : '#3a2410');
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
   }
 
   function draw() {
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    // 高レベルは酔っぱらって画面がゆらゆら
+    const sway = state === 'play' ? params(level, 0).sway : 0;
+    if (sway) {
+      ctx.translate(W / 2, H / 2);
+      ctx.rotate(Math.sin(time * 1.3) * sway);
+      ctx.translate(-W / 2, -H / 2);
+    }
     drawBackground();
-    drawBoss();
+    drawAreas();
+    for (const b of bosses) drawBoss(b);
     for (const b of beers) drawBeer(b);
     drawPlayer();
     drawParticles();
     if (state !== 'title') drawHUD();
     if (state === 'over' && endTimer < 0.5) {
       ctx.fillStyle = `rgba(242,165,22,${0.5 * (1 - endTimer / 0.5)})`;
-      ctx.fillRect(0, 0, W, H);
+      ctx.fillRect(-40, -40, W + 80, H + 80);
     }
     ctx.restore();
   }
@@ -821,6 +1038,7 @@
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+
 })();
 </script>
 </body>
