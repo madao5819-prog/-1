@@ -384,6 +384,7 @@
     warn: () => { beep(330, 0.12, 'square', 0.05); setTimeout(() => beep(330, 0.12, 'square', 0.05), 160); },
     pour: () => beep(160, 0.45, 'sawtooth', 0.05, -80),
     area: () => { beep(1046, 0.1, 'square', 0.04); vibrate(25); },
+    slip: () => { beep(1318, 0.07, 'square', 0.04); setTimeout(() => beep(1760, 0.09, 'square', 0.04), 70); vibrate([15, 30, 15]); },
     splash: () => { beep(200, 0.5, 'sawtooth', 0.08, -150); beep(120, 0.6, 'square', 0.05, -60); vibrate([120, 60, 220]); },
     levelUp: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.16, 'square', 0.05), i * 100)); vibrate([30, 30, 30, 30, 80]); },
   };
@@ -502,6 +503,7 @@
   let paused = false;
   let player, bosses, beers, areas, particles, popups;
   let dodged, level, throwTimer, areaTimer, levelPause, banner, shake, time, endTimer, deathBy, nextBoss;
+  let volleys, volleyId;
 
   function makeBoss(x, dir) {
     return { x, y: BOSS_Y, r: BOSS_R, dir, windup: 0, shout: '', shoutLife: 0 };
@@ -525,6 +527,8 @@
     endTimer = 0;
     deathBy = '';
     nextBoss = 0;
+    volleys = new Map();
+    volleyId = 0;
   }
 
   function start() {
@@ -569,9 +573,10 @@
 
   // ---------- スコア・レベル ----------
   const AREA_BONUS = 3;
-  function addDodge(text, x, y, n = 1, big = false) {
+  const SLIP_BONUS = 2;
+  function addDodge(text, x, y, n = 1, big = false, color) {
     dodged += n;
-    popups.push({ x, y, text, life: big ? 1.1 : 0.7, size: big ? 24 : 16, color: big ? '#e08a00' : undefined });
+    popups.push({ x, y, text, life: big ? 1.1 : 0.7, size: big ? 24 : 16, color: color || (big ? '#e08a00' : undefined) });
     if (dodged >= levelStart(level + 1)) levelUp(level + 1);
   }
 
@@ -604,43 +609,78 @@
     }
     tx = Math.max(20, Math.min(W - 20, tx));
 
-    // 複数投げるときは「着地点」を一定間隔に並べ、間に必ず人が入れるすき間を作る
-    const SPACING = 96;
-    const offsets = [];
-    for (let k = 0; k < p.fan; k++) offsets.push((k - (p.fan - 1) / 2) * SPACING);
-    const arrive = Math.hypot(tx - sx, player.y - sy) / p.speed;
-    // すでに飛んでいるビールとほぼ同時に着くなら、着地点を「同じ列にそろえる」か
-    // 「十分離す」位置にずらす。中途半端に近い（人が通れない）すき間は作らない。
+    // 複数投げるときは、角度を考えて「人が入れるすき間」が必ずできる間隔で並べる。
+    // 端から斜めに投げたビールは横に流れるぶん、間隔を広く取る（等間隔にはならない）。
+    const GAP = 52;
+    const dy = player.y - sy;
+    const zoneOf = lx => dangerZone(lx, (lx - sx) / dy);
+    function layout(center) {
+      const xs = [center];
+      let lo = center, hi = center;
+      const goRightFirst = Math.random() < 0.5;
+      for (let k = 1; k < p.fan; k++) {
+        const right = (k % 2 === 1) === goRightFirst;
+        if (right) {
+          const edge = zoneOf(hi)[1] + GAP;
+          let x = hi + 8;
+          while (zoneOf(x)[0] < edge) x += 2;
+          xs.push(x); hi = x;
+        } else {
+          const edge = zoneOf(lo)[0] - GAP;
+          let x = lo - 8;
+          while (zoneOf(x)[1] > edge) x -= 2;
+          xs.push(x); lo = x;
+        }
+      }
+      return xs;
+    }
+
+    // すでに飛んでいるビールとほぼ同時に着くなら、危ない範囲が「重なる」か
+    // 「十分離れる」位置にずらす。人が通れない中途半端なすき間は作らない。
+    const arrive = Math.hypot(tx - sx, dy) / p.speed;
     const others = [];
     for (const b of beers) {
       if (b.vy <= 0) continue;
       const t = (player.y - b.y) / b.vy;
-      if (t > 0 && Math.abs(t - arrive) < 0.4) others.push(b.x + b.vx * t);
+      if (t > 0 && Math.abs(t - arrive) < 0.4) others.push(dangerZone(b.x + b.vx * t, b.vx / b.vy));
     }
+    let xs = layout(tx);
     if (others.length) {
-      let bestShift = 0, bestCost = Infinity;
-      for (let shift = -SPACING / 2; shift <= SPACING / 2; shift += 4) {
+      let best = xs, bestCost = Infinity;
+      for (let shift = -96; shift <= 96; shift += 4) {
+        const cand = layout(tx + shift);
         let cost = Math.abs(shift) * 0.01;
-        for (const o of offsets) {
-          for (const ox of others) {
-            const d = Math.abs(tx + shift + o - ox);
-            if (d > 6 && d < SPACING * 0.85) cost += SPACING * 0.85 - d;
+        for (const lx of cand) {
+          const z = zoneOf(lx);
+          for (const o of others) {
+            const g = Math.max(z[0], o[0]) - Math.min(z[1], o[1]);
+            if (g > 0 && g < GAP) cost += GAP - g;
           }
         }
-        if (cost < bestCost) { bestCost = cost; bestShift = shift; }
+        if (cost < bestCost) { bestCost = cost; best = cand; }
       }
-      tx += bestShift;
+      // それでも狭いすき間ができるビールは投げない（理不尽な配置を作らない）
+      xs = best.filter(lx => {
+        const z = zoneOf(lx);
+        return others.every(o => {
+          const g = Math.max(z[0], o[0]) - Math.min(z[1], o[1]);
+          return g <= 0 || g >= GAP;
+        });
+      });
+      if (!xs.length) return;
     }
 
-    for (const o of offsets) {
-      const lx = tx + o;
-      const d = Math.hypot(lx - sx, player.y - sy);
+    const vid = ++volleyId;
+    volleys.set(vid, { n: xs.length, left: false, right: false });
+    for (const lx of xs) {
+      const d = Math.hypot(lx - sx, dy);
       beers.push({
         x: sx, y: sy,
         vx: (lx - sx) / d * p.speed,
-        vy: (player.y - sy) / d * p.speed,
+        vy: dy / d * p.speed,
         rot: 0,
         spin: (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 4),
+        vid,
       });
     }
     boss.windup = 0.25;
@@ -726,12 +766,20 @@
     }
   }
 
+  // 当たり判定は見た目より少し小さめ（ビール 18x24、人 34x56 の7〜8割）
+  const HIT_HW = (18 + 34 * 0.7) / 2;
+  const HIT_HH = (24 + 56 * 0.85) / 2;
   function rectHit(b) {
-    // 当たり判定は見た目より少し小さめ
-    const bw = 18, bh = 24;
-    const pw = player.w * 0.7, ph = player.h * 0.85;
-    return Math.abs(b.x - player.x) < (bw + pw) / 2 &&
-           Math.abs(b.y - (player.y - 4)) < (bh + ph) / 2;
+    return Math.abs(b.x - player.x) < HIT_HW &&
+           Math.abs(b.y - (player.y - 4)) < HIT_HH;
+  }
+
+  // ビールが人の高さを通り過ぎるあいだに「人の中心が居てはいけない横の範囲」。
+  // 斜めに飛ぶビールほど、通過中に横へ動くぶん範囲が広くなる。
+  function dangerZone(lx, slope) {
+    const a = lx + slope * (-4 - HIT_HH);
+    const b = lx + slope * (-4 + HIT_HH);
+    return [Math.min(a, b) - HIT_HW, Math.max(a, b) + HIT_HW];
   }
 
   // ---------- 更新 ----------
@@ -831,6 +879,12 @@
       if (Math.random() < 0.4) {
         particles.push({ x: b.x, y: b.y, vx: (Math.random() - 0.5) * 30, vy: -20, life: 0.4, max: 0.4, r: 2 + Math.random() * 2, foam: Math.random() < 0.5 });
       }
+      // 人の高さを通過した瞬間に、ビールが左右どちらを通ったか記録
+      if (!b.crossed && b.y >= player.y - 4) {
+        b.crossed = true;
+        const v = volleys.get(b.vid);
+        if (v) { if (b.x < player.x) v.left = true; else v.right = true; }
+      }
       if (rectHit(b)) {
         deathBy = 'ビールを頭からかぶった…';
         gameOver();
@@ -844,6 +898,16 @@
         if (passed) addSplash(b.x, H - 14, 8, false);
         addDodge('よけた！', player.x, player.y - 50);
         if (state !== 'play') return;
+        // 同じ投げのビールが全部通り過ぎたとき、左右両方を通っていたら「すり抜け」
+        const v = volleys.get(b.vid);
+        if (v && --v.n === 0) {
+          volleys.delete(b.vid);
+          if (v.left && v.right) {
+            sfx.slip();
+            addDodge(`すり抜け！ +${SLIP_BONUS}`, Math.max(90, Math.min(W - 90, player.x)), player.y - 95, SLIP_BONUS, true, '#2e9e4f');
+            if (state !== 'play') return;
+          }
+        }
       }
     }
     beers = beers.filter(b => !b.gone);
