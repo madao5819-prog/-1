@@ -56,6 +56,7 @@
   canvas { display: block; }
 
   #controls {
+    touch-action: none;
     width: 100%;
     max-width: 520px;
     display: flex;
@@ -64,14 +65,14 @@
   }
   .pad {
     flex: 1;
-    height: 84px;
+    height: 92px;
     border: none;
     border-radius: 20px;
     background: #4a2f19;
     color: var(--accent);
     font-size: 36px;
     box-shadow: 0 6px 0 #1a0f07;
-    touch-action: none;
+    pointer-events: none;
   }
   .pad.on {
     background: var(--accent);
@@ -201,7 +202,14 @@
 (() => {
   const W = 400;
   let H = 640;
-  const PER_LEVEL = 10;
+  // Lv.1 は5杯、Lv.2 は7杯、Lv.3 以降は10杯ごとにレベルアップ
+  const LEVEL_SIZES = [5, 7];
+  const levelSize = L => LEVEL_SIZES[L - 1] || 10;
+  function levelStart(L) {
+    let s = 0;
+    for (let i = 1; i < L; i++) s += levelSize(i);
+    return s;
+  }
   const LEVEL_NAMES = ['ほろ酔い', '一杯目', 'ほろほろ', '二次会', 'ハシゴ酒', '泥酔', '記憶なし', '地獄の飲み会', 'クソゲー'];
   const levelName = L => L <= LEVEL_NAMES.length ? LEVEL_NAMES[L - 1] : 'クソゲー極';
 
@@ -249,9 +257,9 @@
          : 1,
       lead: Math.min(0.9, 0.12 * (L - 1)),
       bossSpeed: 70 + L * 20,
-      areaInterval: Math.max(1.5, 7.5 - L * 0.65),
-      warn: Math.max(0.42, 1.15 - L * 0.08),
-      playerSpeed: 300 + Math.min(L, 10) * 8,
+      areaInterval: Math.max(3.2, 8 - L * 0.5),
+      warn: Math.max(0.75, 1.3 - L * 0.06),
+      playerSpeed: 440 + Math.min(L, 10) * 10,
       sway: L >= 7 ? Math.min(0.05, (L - 6) * 0.012) : 0,
     };
   }
@@ -314,48 +322,106 @@
   }
 
   // ---------- 入力 ----------
-  const keys = { left: false, right: false };
-  const pads = { left: false, right: false };
-  let pointerX = null;
+  // 指（ポインター）ごとに入力を管理し、最後に触れた指・キーを優先する。
+  // ◀▶ を同時に押しても止まらず、指を滑らせれば向きが切り替わる。
+  const touches = new Map();
+  let inputOrder = 0;
+  const keys = { left: 0, right: 0 };
+  const controls = $('controls');
+  const leftBtn = $('leftBtn');
+  const rightBtn = $('rightBtn');
 
+  const keySide = k => (k === 'ArrowLeft' || k === 'a' || k === 'A') ? 'left'
+    : (k === 'ArrowRight' || k === 'd' || k === 'D') ? 'right' : null;
   window.addEventListener('keydown', e => {
-    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = true;
-    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = true;
+    const side = keySide(e.key);
+    if (side && !keys[side]) keys[side] = ++inputOrder;
     if (e.key === 'Escape' || e.key === 'p') togglePause();
   });
   window.addEventListener('keyup', e => {
-    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = false;
-    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
+    const side = keySide(e.key);
+    if (side) keys[side] = 0;
   });
 
-  function bindPad(el, side) {
-    const on = e => { e.preventDefault(); pads[side] = true; el.classList.add('on'); el.setPointerCapture?.(e.pointerId); };
-    const off = () => { pads[side] = false; el.classList.remove('on'); };
-    el.addEventListener('pointerdown', on);
-    el.addEventListener('pointerup', off);
-    el.addEventListener('pointercancel', off);
-    el.addEventListener('lostpointercapture', off);
-  }
-  bindPad($('leftBtn'), 'left');
-  bindPad($('rightBtn'), 'right');
-
-  // 画面をなぞると指の位置へ動く
   function toGameX(clientX) {
     const r = canvas.getBoundingClientRect();
     return (clientX - r.left) / scale;
   }
-  canvas.addEventListener('pointerdown', e => { pointerX = toGameX(e.clientX); canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointermove', e => { if (pointerX !== null) pointerX = toGameX(e.clientX); });
-  const releasePointer = () => { pointerX = null; };
-  canvas.addEventListener('pointerup', releasePointer);
-  canvas.addEventListener('pointercancel', releasePointer);
+  function padDir(clientX) {
+    const r = controls.getBoundingClientRect();
+    return clientX < r.left + r.width / 2 ? -1 : 1;
+  }
+  function updatePadVisual() {
+    let l = false, r = false;
+    for (const t of touches.values()) {
+      if (t.kind === 'pad') { if (t.dir < 0) l = true; else r = true; }
+    }
+    leftBtn.classList.toggle('on', l);
+    rightBtn.classList.toggle('on', r);
+  }
+  function capture(el, id) {
+    try { el.setPointerCapture(id); } catch (_) {}
+  }
+
+  // ◀▶ ボタンの帯全体をタッチ領域にする（ボタンの隙間を押しても反応する）
+  controls.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    touches.set(e.pointerId, { kind: 'pad', dir: padDir(e.clientX), order: ++inputOrder });
+    capture(controls, e.pointerId);
+    updatePadVisual();
+  });
+  controls.addEventListener('pointermove', e => {
+    const t = touches.get(e.pointerId);
+    if (t && t.kind === 'pad') {
+      const d = padDir(e.clientX);
+      if (d !== t.dir) { t.dir = d; t.order = ++inputOrder; updatePadVisual(); }
+    }
+  });
+
+  // 画面をなぞると指の位置へ動く
+  canvas.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    touches.set(e.pointerId, { kind: 'drag', x: toGameX(e.clientX), order: ++inputOrder });
+    capture(canvas, e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e => {
+    const t = touches.get(e.pointerId);
+    if (t && t.kind === 'drag') t.x = toGameX(e.clientX);
+  });
+
+  function endTouch(e) {
+    if (touches.delete(e.pointerId)) updatePadVisual();
+  }
+  function clearInput() {
+    touches.clear();
+    keys.left = keys.right = 0;
+    updatePadVisual();
+  }
+  // 指を離したイベントはどこで起きても必ず拾う
+  window.addEventListener('pointerup', endTouch, true);
+  window.addEventListener('pointercancel', endTouch, true);
+  // 念のため：画面から指が全部離れたら入力をリセット（押しっぱなし誤認の防止）
+  window.addEventListener('touchend', e => { if (e.touches.length === 0) clearInput(); }, true);
+  window.addEventListener('touchcancel', e => { if (e.touches.length === 0) clearInput(); }, true);
+  window.addEventListener('blur', clearInput);
+
+  function activeInput() {
+    let best = null;
+    for (const t of touches.values()) if (!best || t.order > best.order) best = t;
+    for (const side of ['left', 'right']) {
+      if (keys[side] && (!best || keys[side] > best.order)) {
+        best = { kind: 'pad', dir: side === 'left' ? -1 : 1, order: keys[side] };
+      }
+    }
+    return best;
+  }
 
   function inputDir() {
-    if (pointerX !== null) {
-      const diff = pointerX - player.x;
-      return Math.abs(diff) < 6 ? 0 : Math.sign(diff);
-    }
-    return ((keys.right || pads.right) ? 1 : 0) - ((keys.left || pads.left) ? 1 : 0);
+    const t = activeInput();
+    if (!t) return 0;
+    if (t.kind === 'pad') return t.dir;
+    const diff = t.x - player.x;
+    return Math.abs(diff) < 1 ? 0 : Math.sign(diff);
   }
 
   // ---------- ゲーム状態 ----------
@@ -432,8 +498,7 @@
   function addDodge(text, x, y) {
     dodged++;
     popups.push({ x, y, text, life: 0.7 });
-    const newLevel = Math.floor(dodged / PER_LEVEL) + 1;
-    if (newLevel > level) levelUp(newLevel);
+    if (dodged >= levelStart(level + 1)) levelUp(level + 1);
   }
 
   function levelUp(L) {
@@ -481,41 +546,61 @@
 
   // ---------- 範囲攻撃 ----------
   // pour: プレイヤー付近に太いビールの滝。gap: 安全地帯以外ぜんぶビール。
+  // 理不尽にならないよう、必ず逃げ道が間に合う位置・幅で出す
   function startArea(p) {
     const ps = p.playerSpeed;
     const types = ['pour'];
     if (level >= 4) types.push('double');
-    if (level >= 5) types.push('gap', 'gap');
+    if (level >= 5) types.push('gap');
     const type = types[Math.floor(Math.random() * types.length)];
     let rects = [];
     let safe = null;
 
     if (type === 'pour' || type === 'double') {
-      const n = type === 'double' ? 2 : 1;
-      for (let i = 0; i < n; i++) {
-        const w = 110 + Math.random() * Math.min(90, level * 12);
-        const c = i === 0
-          ? player.x + (Math.random() - 0.5) * 60
-          : Math.random() * W;
-        const x1 = Math.max(0, Math.min(W - w, c - w / 2));
-        rects.push([x1, x1 + w]);
+      const w = 100 + Math.random() * Math.min(60, level * 8);
+      const c = player.x + (Math.random() - 0.5) * 60;
+      const x1 = Math.max(0, Math.min(W - w, c - w / 2));
+      rects.push([x1, x1 + w]);
+      if (type === 'double') {
+        // 2本目は1本目から十分離して、間に逃げ場を残す
+        const gapMin = 140;
+        const w2 = 90 + Math.random() * 30;
+        const leftRoom = x1 - gapMin;
+        const rightRoom = W - (x1 + w + gapMin);
+        if (rightRoom >= w2 || leftRoom >= w2) {
+          const goRight = rightRoom >= w2 && (leftRoom < w2 || Math.random() < 0.5);
+          const s2 = goRight
+            ? x1 + w + gapMin + Math.random() * (rightRoom - w2)
+            : Math.random() * (leftRoom - w2);
+          rects.push([s2, s2 + w2]);
+        }
       }
     } else {
-      const gw = Math.max(70, 120 - level * 5);
-      // 安全地帯は必ず間に合う距離に置く
-      const reach = ps * p.warn * 0.8;
-      let c = player.x + (Math.random() * 2 - 1) * reach;
-      c = Math.max(gw / 2 + 4, Math.min(W - gw / 2 - 4, c));
-      safe = [c - gw / 2, c + gw / 2];
+      const gw = Math.max(110, 150 - level * 4);
+      // 安全地帯は余裕で間に合う距離に置き、飛んでくるビールの落下地点はなるべく避ける
+      const reach = ps * p.warn * 0.55;
+      let bestC = player.x, bestScore = Infinity;
+      for (let i = 0; i < 12; i++) {
+        let c = player.x + (Math.random() * 2 - 1) * reach;
+        c = Math.max(gw / 2 + 4, Math.min(W - gw / 2 - 4, c));
+        let score = 0;
+        for (const b of beers) {
+          if (b.vy <= 0) continue;
+          const x = b.x + b.vx * ((player.y - b.y) / b.vy);
+          if (x > c - gw / 2 - 20 && x < c + gw / 2 + 20) score++;
+        }
+        if (score < bestScore) { bestScore = score; bestC = c; }
+      }
+      safe = [bestC - gw / 2, bestC + gw / 2];
       rects = [[0, safe[0]], [safe[1], W]];
     }
-    areas.push({ rects, safe, t: 0, warn: p.warn, active: 0.65, poured: false });
+    areas.push({ rects, safe, t: 0, warn: p.warn, active: 0.6, poured: false });
     sfx.warn();
   }
 
   function inArea(a) {
     // 少しだけ甘めの判定
-    const m = 8;
+    const m = 12;
     return a.rects.some(([x1, x2]) => player.x > x1 + m && player.x < x2 - m);
   }
 
@@ -567,11 +652,15 @@
     }
     if (state !== 'play') return;
 
-    const p = params(level, dodged % PER_LEVEL);
+    const p = params(level, dodged - levelStart(level));
 
     // プレイヤー
     const move = inputDir();
-    player.x += move * p.playerSpeed * dt;
+    const step = p.playerSpeed * dt;
+    const ctl = activeInput();
+    // なぞり操作は指の位置にピタッと止まる（行き過ぎてプルプルしない）
+    if (ctl && ctl.kind === 'drag' && Math.abs(ctl.x - player.x) <= step) player.x = ctl.x;
+    else player.x += move * step;
     player.x = Math.max(player.w / 2 + 4, Math.min(W - player.w / 2 - 4, player.x));
     if (move !== 0) { player.face = move; player.step += dt * 14; }
 
@@ -586,17 +675,19 @@
     if (levelPause > 0) levelPause -= dt;
 
     // 通常攻撃
+    const area = areas[0];
+    const calm = area && area.safe;
     throwTimer -= dt;
-    if (throwTimer <= 0 && levelPause <= 0) {
+    if (throwTimer <= 0 && levelPause <= 0 && !calm) {
+      if (area) p.fan = 1;
       throwVolley(p);
-      throwTimer = p.interval * (bosses.length > 1 ? 0.75 : 1) + Math.random() * 0.3;
+      throwTimer = p.interval * (bosses.length > 1 ? 0.75 : 1) * (area ? 1.8 : 1) + Math.random() * 0.3;
     }
 
     // 範囲攻撃（Lv.2 から）
     if (level >= 2 && levelPause <= 0) {
       areaTimer -= dt;
-      const busy = areas.length >= (level >= 8 ? 2 : 1);
-      if (areaTimer <= 0 && !busy) {
+      if (areaTimer <= 0 && areas.length === 0) {
         startArea(p);
         areaTimer = p.areaInterval + Math.random() * 1.5;
       }
@@ -618,6 +709,7 @@
       }
       if (a.t >= a.warn + a.active) {
         a.done = true;
+        if (a.safe) throwTimer = Math.max(throwTimer, 0.5);
         sfx.area();
         addDodge('範囲よけた！', player.x, player.y - 70);
       }
@@ -653,9 +745,7 @@
   function gameOver() {
     state = 'over';
     pauseBtn.classList.remove('show');
-    pads.left = pads.right = false;
-    pointerX = null;
-    document.querySelectorAll('.pad').forEach(el => el.classList.remove('on'));
+    clearInput();
     player.hurt = true;
     shake = 14;
     addSplash(player.x, player.y - 20, 90, true);
@@ -971,8 +1061,8 @@
     ctx.fillText(label, W - tw - 22, 186);
 
     // 次のレベルまでのジョッキゲージ
-    const inLevel = dodged % PER_LEVEL;
-    for (let i = 0; i < PER_LEVEL; i++) {
+    const inLevel = dodged - levelStart(level);
+    for (let i = 0; i < levelSize(level); i++) {
       const x = 12 + i * 13;
       const y = 200;
       ctx.fillStyle = i < inLevel ? '#f2a516' : 'rgba(58,36,16,.22)';
