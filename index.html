@@ -61,17 +61,17 @@
     max-width: 520px;
     display: flex;
     gap: 12px;
-    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+    padding: 6px 12px calc(8px + env(safe-area-inset-bottom));
   }
   .pad {
     flex: 1;
-    height: 92px;
+    height: 60px;
     border: none;
-    border-radius: 20px;
+    border-radius: 16px;
     background: #4a2f19;
     color: var(--accent);
-    font-size: 36px;
-    box-shadow: 0 6px 0 #1a0f07;
+    font-size: 26px;
+    box-shadow: 0 4px 0 #1a0f07;
     pointer-events: none;
   }
   .pad.on {
@@ -204,6 +204,10 @@
   let H = 640;
   // Lv.1 は5杯、Lv.2 は7杯、Lv.3 以降は10杯ごとにレベルアップ
   const LEVEL_SIZES = [5, 7];
+  // 画面上部のレイアウト（顔を小さくして盤面を広く）
+  const BOSS_Y = 66, BOSS_R = 40;
+  const HUD_Y = 122;
+  const AREA_TOP = HUD_Y + 50;
   const levelSize = L => LEVEL_SIZES[L - 1] || 10;
   function levelStart(L) {
     let s = 0;
@@ -338,7 +342,7 @@
   function resize() {
     const r = field.getBoundingClientRect();
     scale = Math.min(r.width / W, r.height / 560);
-    H = Math.round(Math.min(900, Math.max(560, r.height / scale)));
+    H = Math.round(Math.min(1000, Math.max(560, r.height / scale)));
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
     canvas.style.width = (W * scale) + 'px';
     canvas.style.height = (H * scale) + 'px';
@@ -500,7 +504,7 @@
   let dodged, level, throwTimer, areaTimer, levelPause, banner, shake, time, endTimer, deathBy, nextBoss;
 
   function makeBoss(x, dir) {
-    return { x, y: 92, r: 58, dir, windup: 0, shout: '', shoutLife: 0 };
+    return { x, y: BOSS_Y, r: BOSS_R, dir, windup: 0, shout: '', shoutLife: 0 };
   }
 
   function reset() {
@@ -564,9 +568,10 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
 
   // ---------- スコア・レベル ----------
-  function addDodge(text, x, y) {
-    dodged++;
-    popups.push({ x, y, text, life: 0.7 });
+  const AREA_BONUS = 3;
+  function addDodge(text, x, y, n = 1, big = false) {
+    dodged += n;
+    popups.push({ x, y, text, life: big ? 1.1 : 0.7, size: big ? 24 : 16, color: big ? '#e08a00' : undefined });
     if (dodged >= levelStart(level + 1)) levelUp(level + 1);
   }
 
@@ -581,7 +586,7 @@
     if (L >= 6 && bosses.length < 2) {
       const b = bosses[0];
       bosses.push(makeBoss(b.x > W / 2 ? 80 : W - 80, -b.dir));
-      popups.push({ x: W / 2, y: 230, text: 'もう1人きた！', life: 1.6, color: '#d9412b' });
+      popups.push({ x: W / 2, y: AREA_TOP + 20, text: 'もう1人きた！', life: 1.6, color: '#d9412b' });
     }
     for (const b of bosses) say(b, line('intro', L), 1.6);
   }
@@ -591,21 +596,49 @@
     const boss = bosses[nextBoss % bosses.length];
     nextBoss++;
     const sx = boss.x + (Math.random() - 0.5) * 30;
-    const sy = boss.y + 40;
+    const sy = boss.y + boss.r * 0.7;
     let tx = player.x + (Math.random() - 0.5) * 50;
     if (Math.random() < p.lead) {
       const dist = Math.hypot(tx - sx, player.y - sy);
       tx += inputDir() * p.playerSpeed * (dist / p.speed) * 0.7;
     }
     tx = Math.max(20, Math.min(W - 20, tx));
-    const base = Math.atan2(player.y - sy, tx - sx);
-    const spread = 0.21;
-    for (let k = 0; k < p.fan; k++) {
-      const a = base + (k - (p.fan - 1) / 2) * spread;
+
+    // 複数投げるときは「着地点」を一定間隔に並べ、間に必ず人が入れるすき間を作る
+    const SPACING = 96;
+    const offsets = [];
+    for (let k = 0; k < p.fan; k++) offsets.push((k - (p.fan - 1) / 2) * SPACING);
+    const arrive = Math.hypot(tx - sx, player.y - sy) / p.speed;
+    // すでに飛んでいるビールとほぼ同時に着くなら、着地点を「同じ列にそろえる」か
+    // 「十分離す」位置にずらす。中途半端に近い（人が通れない）すき間は作らない。
+    const others = [];
+    for (const b of beers) {
+      if (b.vy <= 0) continue;
+      const t = (player.y - b.y) / b.vy;
+      if (t > 0 && Math.abs(t - arrive) < 0.4) others.push(b.x + b.vx * t);
+    }
+    if (others.length) {
+      let bestShift = 0, bestCost = Infinity;
+      for (let shift = -SPACING / 2; shift <= SPACING / 2; shift += 4) {
+        let cost = Math.abs(shift) * 0.01;
+        for (const o of offsets) {
+          for (const ox of others) {
+            const d = Math.abs(tx + shift + o - ox);
+            if (d > 6 && d < SPACING * 0.85) cost += SPACING * 0.85 - d;
+          }
+        }
+        if (cost < bestCost) { bestCost = cost; bestShift = shift; }
+      }
+      tx += bestShift;
+    }
+
+    for (const o of offsets) {
+      const lx = tx + o;
+      const d = Math.hypot(lx - sx, player.y - sy);
       beers.push({
         x: sx, y: sy,
-        vx: Math.cos(a) * p.speed,
-        vy: Math.sin(a) * p.speed,
+        vx: (lx - sx) / d * p.speed,
+        vy: (player.y - sy) / d * p.speed,
         rot: 0,
         spin: (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 4),
       });
@@ -785,7 +818,7 @@
         a.done = true;
         if (a.safe) throwTimer = Math.max(throwTimer, 0.5);
         sfx.area();
-        addDodge('範囲よけた！', player.x, player.y - 70);
+        addDodge(`範囲よけた！ +${AREA_BONUS}`, Math.max(90, Math.min(W - 90, player.x)), player.y - 80, AREA_BONUS, true);
       }
     }
     areas = areas.filter(a => !a.done);
@@ -902,7 +935,7 @@
   }
 
   function drawAreas() {
-    const top = 218;
+    const top = AREA_TOP;
     for (const a of areas) {
       if (a.t < a.warn) {
         // 予告：赤く点滅するエリア
@@ -967,7 +1000,7 @@
 
     ctx.fillStyle = '#1d1d1f';
     ctx.beginPath();
-    ctx.ellipse(x, y + boss.r + 10, boss.r * 0.95, 28, 0, Math.PI, 0);
+    ctx.ellipse(x, y + boss.r + 8, boss.r * 0.95, 20, 0, Math.PI, 0);
     ctx.fill();
 
     ctx.save();
@@ -1001,7 +1034,7 @@
       ctx.font = 'bold 22px sans-serif';
       const size = Math.min(22, 22 * (W - 16) / ctx.measureText(boss.shout).width);
       const cx = Math.max(ctx.measureText(boss.shout).width * size / 44 + 8, Math.min(W - ctx.measureText(boss.shout).width * size / 44 - 8, x));
-      outlinedText(boss.shout, cx, y + boss.r + 34, size, '#d9412b');
+      outlinedText(boss.shout, cx, y + boss.r + 26, size, '#d9412b');
     }
   }
 
@@ -1136,27 +1169,27 @@
     ctx.font = 'bold 15px sans-serif';
     const lw = ctx.measureText(lv).width;
     ctx.fillStyle = level >= 9 ? 'rgba(217,65,43,.9)' : 'rgba(58,36,16,.85)';
-    roundRect(10, 166, lw + 20, 28, 14);
+    roundRect(10, HUD_Y, lw + 20, 28, 14);
     ctx.fill();
     ctx.fillStyle = '#fff7e6';
     ctx.textAlign = 'left';
-    ctx.fillText(lv, 20, 186);
+    ctx.fillText(lv, 20, HUD_Y + 20);
 
     // よけた数
     const label = `よけた ${dodged}`;
     ctx.font = 'bold 16px sans-serif';
     const tw = ctx.measureText(label).width;
     ctx.fillStyle = 'rgba(58,36,16,.85)';
-    roundRect(W - tw - 34, 166, tw + 24, 28, 14);
+    roundRect(W - tw - 34, HUD_Y, tw + 24, 28, 14);
     ctx.fill();
     ctx.fillStyle = '#fff7e6';
-    ctx.fillText(label, W - tw - 22, 186);
+    ctx.fillText(label, W - tw - 22, HUD_Y + 20);
 
     // 次のレベルまでのジョッキゲージ
     const inLevel = dodged - levelStart(level);
     for (let i = 0; i < levelSize(level); i++) {
       const x = 12 + i * 13;
-      const y = 200;
+      const y = HUD_Y + 34;
       ctx.fillStyle = i < inLevel ? '#f2a516' : 'rgba(58,36,16,.22)';
       roundRect(x, y, 9, 12, 2);
       ctx.fill();
@@ -1164,7 +1197,7 @@
 
     for (const p of popups) {
       ctx.globalAlpha = Math.min(1, p.life * 2);
-      outlinedText(p.text, p.x, p.y, 16, p.color || '#3a8ee6');
+      outlinedText(p.text, p.x, p.y, p.size || 16, p.color || '#3a8ee6');
     }
     ctx.globalAlpha = 1;
 
