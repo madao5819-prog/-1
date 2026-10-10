@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow, noimageindex">
+<meta name="theme-color" content="#2b1a0e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ビールよけ">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<title>ビールよけ</title>
+<style>
+  :root {
+    --bg: #2b1a0e;
+    --panel: #fff7e6;
+    --ink: #3a2410;
+    --accent: #f2a516;
+    --accent-dark: #a86e07;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Hiragino Maru Gothic ProN", "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  #app {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  #field {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas { display: block; }
+
+  #controls {
+    width: 100%;
+    max-width: 520px;
+    display: flex;
+    gap: 12px;
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+  .pad {
+    flex: 1;
+    height: 84px;
+    border: none;
+    border-radius: 20px;
+    background: #4a2f19;
+    color: var(--accent);
+    font-size: 36px;
+    box-shadow: 0 6px 0 #1a0f07;
+    touch-action: none;
+  }
+  .pad.on {
+    background: var(--accent);
+    color: var(--bg);
+    transform: translateY(4px);
+    box-shadow: 0 2px 0 #1a0f07;
+  }
+
+  #pauseBtn {
+    position: absolute;
+    top: calc(10px + env(safe-area-inset-top));
+    right: calc(10px + env(safe-area-inset-right));
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(58,36,16,.75);
+    color: var(--panel);
+    font-size: 18px;
+    font-weight: bold;
+    display: none;
+  }
+  #pauseBtn.show { display: block; }
+
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+    text-align: center;
+    background: rgba(43, 26, 14, .82);
+    color: var(--panel);
+    z-index: 10;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h1 {
+    margin: 0;
+    font-size: 42px;
+    letter-spacing: .05em;
+    color: var(--accent);
+    text-shadow: 0 3px 0 #7a4a06;
+  }
+  .overlay p { margin: 0; line-height: 1.7; font-size: 16px; }
+  .overlay .face {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    border: 5px solid var(--accent);
+    object-fit: cover;
+  }
+  .overlay button {
+    margin-top: 6px;
+    min-width: 220px;
+    font: inherit;
+    font-size: 22px;
+    font-weight: bold;
+    padding: 16px 36px;
+    border: none;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--ink);
+    box-shadow: 0 6px 0 var(--accent-dark);
+  }
+  .overlay button:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--accent-dark); }
+  .overlay button.sub {
+    background: transparent;
+    color: var(--panel);
+    box-shadow: none;
+    border: 2px solid rgba(255,247,230,.5);
+    font-size: 16px;
+    padding: 10px 24px;
+  }
+  .small { font-size: 13px !important; opacity: .8; }
+  .best { color: var(--accent); font-weight: bold; }
+
+  #rotate { display: none; }
+  @media (orientation: landscape) and (max-height: 500px) {
+    #rotate { display: flex; z-index: 20; background: var(--bg); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="field"><canvas id="game"></canvas></div>
+  <div id="controls">
+    <button class="pad" id="leftBtn" aria-label="左へ">◀</button>
+    <button class="pad" id="rightBtn" aria-label="右へ">▶</button>
+  </div>
+  <button id="pauseBtn" aria-label="一時停止">II</button>
+</div>
+
+<div class="overlay" id="startScreen">
+  <img class="face" src="face.jpg" alt="">
+  <h1>ビールよけ</h1>
+  <p>あいつがビールをかけてくる！<br>10杯よけきればクリア！<br>1杯でも浴びたらゲームオーバー</p>
+  <p class="small">◀ ▶ ボタンを押す or 画面をなぞって動かす</p>
+  <p class="best" id="bestText"></p>
+  <button id="startBtn">スタート</button>
+</div>
+
+<div class="overlay hidden" id="pauseScreen">
+  <h1>ひと休み</h1>
+  <p>ビールは待ってくれている…</p>
+  <button id="resumeBtn">つづける</button>
+  <button class="sub" id="quitBtn">タイトルへ</button>
+</div>
+
+<div class="overlay hidden" id="endScreen">
+  <img class="face" src="face.jpg" alt="">
+  <h1 id="endTitle"></h1>
+  <p id="endText"></p>
+  <button id="retryBtn">もう一回</button>
+  <button class="sub" id="titleBtn">タイトルへ</button>
+</div>
+
+<div class="overlay" id="rotate">
+  <h1>📱</h1>
+  <p>スマホを縦にして遊んでね</p>
+</div>
+
+<script>
+(() => {
+  const W = 400;
+  let H = 640;
+  const GOAL = 10;
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('game');
+  const ctx = canvas.getContext('2d');
+  const field = $('field');
+  const startScreen = $('startScreen');
+  const pauseScreen = $('pauseScreen');
+  const endScreen = $('endScreen');
+  const pauseBtn = $('pauseBtn');
+
+  const faceImg = new Image();
+  faceImg.src = 'face.jpg';
+
+  // ---------- 記録 ----------
+  const BEST_KEY = 'beer-dodge-best';
+  function loadBest() {
+    try { return JSON.parse(localStorage.getItem(BEST_KEY)) || { dodged: 0, clears: 0 }; }
+    catch (_) { return { dodged: 0, clears: 0 }; }
+  }
+  function saveBest(b) {
+    try { localStorage.setItem(BEST_KEY, JSON.stringify(b)); } catch (_) {}
+  }
+  let best = loadBest();
+  function showBest() {
+    $('bestText').textContent = best.clears > 0
+      ? `クリア回数：${best.clears}回`
+      : (best.dodged > 0 ? `ベスト：${best.dodged} / ${GOAL} 杯よけた` : '');
+  }
+  showBest();
+
+  // ---------- 画面サイズ（縦長スマホは画面いっぱいに） ----------
+  let scale = 1;
+  function resize() {
+    const r = field.getBoundingClientRect();
+    scale = Math.min(r.width / W, r.height / 560);
+    H = Math.round(Math.min(900, Math.max(560, r.height / scale)));
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+    canvas.width = Math.round(W * scale * dpr);
+    canvas.height = Math.round(H * scale * dpr);
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+    if (player) player.y = H - 70;
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+
+  // iOS のピンチズーム・ダブルタップズームを防ぐ
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('dblclick', e => e.preventDefault());
+  document.addEventListener('contextmenu', e => e.preventDefault());
+
+  // ---------- 音と振動 ----------
+  let audio = null;
+  function beep(freq, dur, type = 'square', vol = 0.06, slide = 0) {
+    if (!audio) return;
+    const t = audio.currentTime;
+    const o = audio.createOscillator();
+    const g = audio.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(audio.destination);
+    o.start(t);
+    o.stop(t + dur);
+  }
+  function vibrate(p) {
+    try { if (navigator.vibrate) navigator.vibrate(p); } catch (_) {}
+  }
+  const sfx = {
+    throw: () => beep(500, 0.15, 'triangle', 0.07, -250),
+    dodge: () => { beep(880, 0.08, 'square', 0.04); vibrate(15); },
+    splash: () => { beep(200, 0.5, 'sawtooth', 0.08, -150); beep(120, 0.6, 'square', 0.05, -60); vibrate([120, 60, 220]); },
+    clear: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.18, 'square', 0.05), i * 120)); vibrate([40, 40, 40, 40, 120]); },
+  };
+  function unlockAudio() {
+    if (!audio) {
+      try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { audio = null; }
+    }
+    if (audio && audio.state === 'suspended') audio.resume();
+  }
+
+  // ---------- 入力 ----------
+  const keys = { left: false, right: false };
+  const pads = { left: false, right: false };
+  let pointerX = null;
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = true;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = true;
+    if (e.key === 'Escape' || e.key === 'p') togglePause();
+  });
+  window.addEventListener('keyup', e => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
+  });
+
+  function bindPad(el, side) {
+    const on = e => { e.preventDefault(); pads[side] = true; el.classList.add('on'); el.setPointerCapture?.(e.pointerId); };
+    const off = () => { pads[side] = false; el.classList.remove('on'); };
+    el.addEventListener('pointerdown', on);
+    el.addEventListener('pointerup', off);
+    el.addEventListener('pointercancel', off);
+    el.addEventListener('lostpointercapture', off);
+  }
+  bindPad($('leftBtn'), 'left');
+  bindPad($('rightBtn'), 'right');
+
+  // 画面をなぞると指の位置へ動く
+  function toGameX(clientX) {
+    const r = canvas.getBoundingClientRect();
+    return (clientX - r.left) / scale;
+  }
+  canvas.addEventListener('pointerdown', e => { pointerX = toGameX(e.clientX); canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e => { if (pointerX !== null) pointerX = toGameX(e.clientX); });
+  const releasePointer = () => { pointerX = null; };
+  canvas.addEventListener('pointerup', releasePointer);
+  canvas.addEventListener('pointercancel', releasePointer);
+
+  function inputDir() {
+    if (pointerX !== null) {
+      const diff = pointerX - player.x;
+      return Math.abs(diff) < 6 ? 0 : Math.sign(diff);
+    }
+    return ((keys.right || pads.right) ? 1 : 0) - ((keys.left || pads.left) ? 1 : 0);
+  }
+
+  // ---------- ゲーム状態 ----------
+  let state = 'title';
+  let paused = false;
+  let player, boss, beers, particles, dodged, thrown, throwTimer, shake, time, hitBeer, endTimer, popups;
+
+  function reset() {
+    player = { x: W / 2, y: H - 70, w: 34, h: 56, speed: 300, face: 1, step: 0, hurt: false };
+    boss = { x: W / 2, y: 92, r: 58, dir: 1, speed: 70, windup: 0 };
+    beers = [];
+    particles = [];
+    popups = [];
+    dodged = 0;
+    thrown = 0;
+    throwTimer = 1.2;
+    shake = 0;
+    time = 0;
+    hitBeer = null;
+    endTimer = 0;
+  }
+
+  function start() {
+    unlockAudio();
+    reset();
+    state = 'play';
+    paused = false;
+    startScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    pauseScreen.classList.add('hidden');
+    pauseBtn.classList.add('show');
+  }
+
+  function toTitle() {
+    reset();
+    state = 'title';
+    paused = false;
+    showBest();
+    pauseScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    startScreen.classList.remove('hidden');
+    pauseBtn.classList.remove('show');
+  }
+
+  function setPaused(p) {
+    if (state !== 'play') return;
+    paused = p;
+    pauseScreen.classList.toggle('hidden', !p);
+    if (!p) unlockAudio();
+  }
+  function togglePause() { setPaused(!paused); }
+
+  $('startBtn').addEventListener('click', start);
+  $('retryBtn').addEventListener('click', start);
+  $('titleBtn').addEventListener('click', toTitle);
+  $('quitBtn').addEventListener('click', toTitle);
+  $('resumeBtn').addEventListener('click', () => setPaused(false));
+  pauseBtn.addEventListener('click', () => setPaused(true));
+  // アプリを切り替えたら自動で一時停止
+  document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
+
+  // ---------- ビール ----------
+  function throwBeer() {
+    const i = thrown;
+    thrown++;
+    const speed = 250 + i * 32;
+    const sx = boss.x + (Math.random() - 0.5) * 30;
+    const sy = boss.y + 40;
+    let tx = player.x + (Math.random() - 0.5) * 50;
+
+    // 後半はプレイヤーの動きを先読みしてくる
+    if (i >= 4 && Math.random() < 0.5) {
+      const dist = Math.hypot(tx - sx, player.y - sy);
+      tx += inputDir() * player.speed * (dist / speed) * 0.7;
+    }
+    tx = Math.max(20, Math.min(W - 20, tx));
+
+    const ty = player.y;
+    const d = Math.hypot(tx - sx, ty - sy);
+    beers.push({
+      x: sx, y: sy,
+      vx: (tx - sx) / d * speed,
+      vy: (ty - sy) / d * speed,
+      rot: 0,
+      spin: (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 4),
+      passed: false,
+    });
+    boss.windup = 0.25;
+    sfx.throw();
+  }
+
+  function addSplash(x, y, n, big) {
+    for (let k = 0; k < n; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = (big ? 120 : 40) + Math.random() * (big ? 260 : 80);
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s - (big ? 120 : 20),
+        life: 0.6 + Math.random() * 0.6,
+        max: 1.2,
+        r: 2 + Math.random() * (big ? 6 : 3),
+        foam: Math.random() < 0.35,
+      });
+    }
+  }
+
+  function rectHit(b) {
+    // 当たり判定は見た目より少し小さめ
+    const bw = 18, bh = 24;
+    const pw = player.w * 0.7, ph = player.h * 0.85;
+    return Math.abs(b.x - player.x) < (bw + pw) / 2 &&
+           Math.abs(b.y - (player.y - 4)) < (bh + ph) / 2;
+  }
+
+  // ---------- 更新 ----------
+  function update(dt) {
+    time += dt;
+    if (shake > 0) shake = Math.max(0, shake - dt * 30);
+
+    for (const p of particles) {
+      p.vy += 600 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+    }
+    particles = particles.filter(p => p.life > 0);
+    for (const p of popups) { p.y -= 40 * dt; p.life -= dt; }
+    popups = popups.filter(p => p.life > 0);
+
+    if (state === 'over' || state === 'clear') {
+      endTimer += dt;
+      return;
+    }
+    if (state !== 'play') return;
+
+    // プレイヤー
+    const move = inputDir();
+    player.x += move * player.speed * dt;
+    player.x = Math.max(player.w / 2 + 4, Math.min(W - player.w / 2 - 4, player.x));
+    if (move !== 0) { player.face = move; player.step += dt * 14; }
+
+    // ビールを投げる人
+    boss.x += boss.dir * boss.speed * (1 + dodged * 0.08) * dt;
+    if (boss.x > W - boss.r - 10) { boss.x = W - boss.r - 10; boss.dir = -1; }
+    if (boss.x < boss.r + 10) { boss.x = boss.r + 10; boss.dir = 1; }
+    if (boss.windup > 0) boss.windup -= dt;
+
+    if (thrown < GOAL) {
+      throwTimer -= dt;
+      if (throwTimer <= 0) {
+        throwBeer();
+        throwTimer = Math.max(0.55, 1.35 - thrown * 0.08) + Math.random() * 0.35;
+      }
+    }
+
+    for (const b of beers) {
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.rot += b.spin * dt;
+      if (Math.random() < 0.5) {
+        particles.push({ x: b.x, y: b.y, vx: (Math.random() - 0.5) * 30, vy: -20, life: 0.4, max: 0.4, r: 2 + Math.random() * 2, foam: Math.random() < 0.5 });
+      }
+      if (!b.passed && rectHit(b)) {
+        hitBeer = b;
+        gameOver();
+        return;
+      }
+      if (!b.passed && b.y > player.y + player.h / 2 + 10) {
+        b.passed = true;
+        dodged++;
+        sfx.dodge();
+        popups.push({ x: player.x, y: player.y - 50, text: 'よけた！', life: 0.7 });
+        addSplash(b.x, H - 14, 14, false);
+        if (dodged >= GOAL) { gameClear(); return; }
+      }
+    }
+    beers = beers.filter(b => b.y < H + 40 && b.x > -40 && b.x < W + 40);
+  }
+
+  function finish() {
+    pauseBtn.classList.remove('show');
+    pads.left = pads.right = false;
+    pointerX = null;
+    document.querySelectorAll('.pad').forEach(el => el.classList.remove('on'));
+  }
+
+  function gameOver() {
+    state = 'over';
+    finish();
+    player.hurt = true;
+    shake = 14;
+    addSplash(player.x, player.y - 20, 90, true);
+    beers = beers.filter(b => b === hitBeer);
+    sfx.splash();
+    const newBest = dodged > best.dodged;
+    if (newBest) { best.dodged = dodged; saveBest(best); }
+    setTimeout(() => {
+      $('endTitle').textContent = 'ビールまみれ…';
+      $('endText').innerHTML = `よけた数：<b>${dodged}</b> / ${GOAL}${newBest ? '（自己ベスト！）' : ''}<br>カンパーイ！（ずぶ濡れ）`;
+      endScreen.classList.remove('hidden');
+    }, 1100);
+  }
+
+  function gameClear() {
+    state = 'clear';
+    finish();
+    sfx.clear();
+    best.dodged = GOAL;
+    best.clears = (best.clears || 0) + 1;
+    saveBest(best);
+    setTimeout(() => {
+      $('endTitle').textContent = '完全回避！';
+      $('endText').innerHTML = `10杯ぜんぶよけきった！<br>ビールは自分で飲もう 🍺<br><span class="small">クリア ${best.clears} 回目</span>`;
+      endScreen.classList.remove('hidden');
+    }, 900);
+  }
+
+  // ---------- 描画 ----------
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function outlinedText(text, x, y, size, fill, align = 'center') {
+    ctx.font = `bold ${size}px sans-serif`;
+    ctx.textAlign = align;
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = '#fff';
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = fill;
+    ctx.fillText(text, x, y);
+  }
+
+  function drawBackground() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#f3dfb6');
+    g.addColorStop(1, '#e6c48c');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // ちょうちん
+    for (let i = 0; i < 4; i++) {
+      const x = 50 + i * 100;
+      const sway = Math.sin(time * 1.5 + i) * 3;
+      ctx.save();
+      ctx.translate(x + sway, 20);
+      ctx.fillStyle = '#d9412b';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 13, 17, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,220,150,.35)';
+      ctx.beginPath();
+      ctx.ellipse(-4, -4, 4, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#3a2410';
+      ctx.fillRect(-7, -19, 14, 4);
+      ctx.fillRect(-7, 15, 14, 4);
+      ctx.restore();
+    }
+
+    // 床
+    ctx.fillStyle = '#b07a3f';
+    ctx.fillRect(0, H - 30, W, 30);
+    ctx.fillStyle = '#8c5a28';
+    for (let x = 0; x < W; x += 50) ctx.fillRect(x, H - 30, 2, 30);
+    ctx.fillStyle = '#c99257';
+    ctx.fillRect(0, H - 30, W, 4);
+  }
+
+  function drawBoss() {
+    const wob = Math.sin(time * 6) * 3;
+    const wind = boss.windup > 0 ? Math.sin(boss.windup * 60) * 4 : 0;
+    const x = boss.x + wind, y = boss.y + wob;
+
+    ctx.fillStyle = '#1d1d1f';
+    ctx.beginPath();
+    ctx.ellipse(x, y + boss.r + 10, boss.r * 0.95, 28, 0, Math.PI, 0);
+    ctx.fill();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, boss.r, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.fillStyle = '#e0b48a';
+    ctx.fill();
+    ctx.clip();
+    if (faceImg.complete && faceImg.naturalWidth) {
+      ctx.drawImage(faceImg, x - boss.r, y - boss.r, boss.r * 2, boss.r * 2);
+    }
+    ctx.restore();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#f2a516';
+    ctx.beginPath();
+    ctx.arc(x, y, boss.r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (boss.windup > 0 && state === 'play') {
+      const right = boss.x > W / 2;
+      outlinedText('それっ！', right ? x - boss.r - 6 : x + boss.r + 6, y - 10, 18, '#d9412b', right ? 'right' : 'left');
+    }
+    if (state === 'over') outlinedText('カンパーイ！', x, y + boss.r + 34, 22, '#d9412b');
+    if (state === 'clear') outlinedText('ぐぬぬ…', x, y + boss.r + 34, 20, '#3a2410');
+  }
+
+  function drawBeer(b) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(b.rot);
+    ctx.strokeStyle = 'rgba(255,255,255,.85)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(13, 2, 7, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    roundRect(-13, -17, 26, 34, 4);
+    ctx.fill();
+    const g = ctx.createLinearGradient(0, -8, 0, 16);
+    g.addColorStop(0, '#f7b733');
+    g.addColorStop(1, '#d9820b');
+    ctx.fillStyle = g;
+    roundRect(-11, -8, 22, 23, 3);
+    ctx.fill();
+    ctx.fillStyle = '#fffaf0';
+    ctx.beginPath();
+    ctx.arc(-7, -10, 6, 0, Math.PI * 2);
+    ctx.arc(0, -12, 7, 0, Math.PI * 2);
+    ctx.arc(7, -10, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-12, -10, 24, 4);
+    ctx.fillStyle = 'rgba(255,255,255,.6)';
+    ctx.fillRect(-8, -4, 3, 16);
+    ctx.restore();
+  }
+
+  function drawPlayer() {
+    const p = player;
+    const leg = Math.sin(p.step) * 6;
+    const jump = state === 'clear' ? Math.abs(Math.sin(endTimer * 8)) * 18 : 0;
+
+    ctx.save();
+    ctx.translate(p.x, p.y - jump);
+
+    ctx.fillStyle = 'rgba(0,0,0,.18)';
+    ctx.beginPath();
+    ctx.ellipse(0, 30 + jump, 18, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#2d3a5a';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-6, 12); ctx.lineTo(-6 + leg, 27);
+    ctx.moveTo(6, 12); ctx.lineTo(6 - leg, 27);
+    ctx.stroke();
+
+    ctx.fillStyle = p.hurt ? '#e0a33a' : '#3a8ee6';
+    roundRect(-14, -12, 28, 28, 8);
+    ctx.fill();
+
+    ctx.strokeStyle = '#ffd7b0';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    if (state === 'clear') {
+      ctx.moveTo(-12, -6); ctx.lineTo(-20, -24);
+      ctx.moveTo(12, -6); ctx.lineTo(20, -24);
+    } else {
+      ctx.moveTo(-13, -4); ctx.lineTo(-19, 10 - leg / 2);
+      ctx.moveTo(13, -4); ctx.lineTo(19, 10 + leg / 2);
+    }
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffd7b0';
+    ctx.beginPath();
+    ctx.arc(0, -26, 15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#3a2410';
+    ctx.beginPath();
+    ctx.arc(0, -30, 15, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.fill();
+
+    ctx.fillStyle = '#3a2410';
+    const fx = p.face * 3;
+    if (p.hurt) {
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('×  ×', fx, -23);
+      ctx.beginPath();
+      ctx.arc(fx, -17, 3, 0, Math.PI);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.arc(fx - 5, -25, 2, 0, Math.PI * 2);
+      ctx.arc(fx + 5, -25, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#3a2410';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      if (state === 'clear') ctx.arc(fx, -21, 4, 0, Math.PI);
+      else { ctx.moveTo(fx - 3, -18); ctx.lineTo(fx + 3, -18); }
+      ctx.stroke();
+    }
+
+    if (p.hurt) {
+      ctx.fillStyle = 'rgba(255,250,235,.95)';
+      ctx.beginPath();
+      ctx.arc(-8, -40, 8, 0, Math.PI * 2);
+      ctx.arc(3, -43, 9, 0, Math.PI * 2);
+      ctx.arc(12, -38, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(242,165,22,.55)';
+      for (let i = 0; i < 4; i++) {
+        const dy = ((endTimer * 40 + i * 13) % 40);
+        ctx.fillRect(-12 + i * 8, -14 + dy, 3, 6);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, p.life / p.max * 1.5));
+      ctx.fillStyle = p.foam ? '#fffaf0' : '#f2a516';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawHUD() {
+    const label = `よけた ${dodged} / ${GOAL}`;
+    ctx.font = 'bold 16px sans-serif';
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(58,36,16,.85)';
+    roundRect(W - tw - 34, 168, tw + 24, 30, 15);
+    ctx.fill();
+    ctx.fillStyle = '#fff7e6';
+    ctx.textAlign = 'left';
+    ctx.fillText(label, W - tw - 22, 189);
+
+    for (let i = 0; i < GOAL; i++) {
+      const x = 14 + i * 18;
+      const y = 172;
+      ctx.fillStyle = i < dodged ? '#f2a516' : 'rgba(58,36,16,.25)';
+      roundRect(x, y, 13, 18, 3);
+      ctx.fill();
+      if (i < dodged) {
+        ctx.fillStyle = '#fffaf0';
+        ctx.fillRect(x, y, 13, 5);
+      }
+    }
+
+    for (const p of popups) {
+      ctx.globalAlpha = Math.min(1, p.life * 2);
+      outlinedText(p.text, p.x, p.y, 16, '#3a8ee6');
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    drawBackground();
+    drawBoss();
+    for (const b of beers) drawBeer(b);
+    drawPlayer();
+    drawParticles();
+    if (state !== 'title') drawHUD();
+    if (state === 'over' && endTimer < 0.5) {
+      ctx.fillStyle = `rgba(242,165,22,${0.5 * (1 - endTimer / 0.5)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.restore();
+  }
+
+  // ---------- ループ ----------
+  reset();
+  resize();
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    if (!paused) update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
