@@ -213,6 +213,75 @@
   const LEVEL_NAMES = ['ほろ酔い', '一杯目', 'ほろほろ', '二次会', 'ハシゴ酒', '泥酔', '記憶なし', '地獄の飲み会', 'クソゲー'];
   const levelName = L => L <= LEVEL_NAMES.length ? LEVEL_NAMES[L - 1] : 'クソゲー極';
 
+  // ---------- セリフ（レベルごとに変わる） ----------
+  // throw: 投げるとき / area: 範囲攻撃 / gap: 安全地帯以外ぜんぶ / intro: レベルアップ時
+  const LINES = [
+    { // Lv.1 ほろ酔い
+      throw: ['それっ！', 'ほいっ！', 'えいっ！', 'どうぞ〜', '一杯どう？'],
+      intro: ['軽く飲もうか'],
+    },
+    { // Lv.2 一杯目
+      throw: ['乾杯だ！', '飲め飲め！', 'とりあえず生！', 'まずは一杯！', 'グイッと！'],
+      area: ['ビールの滝！', 'ドバーッ！'],
+      intro: ['まだ一杯目だぞ'],
+    },
+    { // Lv.3 ほろほろ
+      throw: ['おかわり！', 'まだまだ！', '逃げるな〜', 'ほらほら！', 'よけるなよ'],
+      area: ['ジョッキごと！', 'ドバドバ！'],
+      intro: ['あったまってきた'],
+    },
+    { // Lv.4 二次会
+      throw: ['二次会だ！', '次の店！', '帰さないぞ', '飲み足りん！', '終電？知らん'],
+      area: ['ダブルで！', '滝2本！'],
+      intro: ['二次会いくぞ！'],
+    },
+    { // Lv.5 ハシゴ酒
+      throw: ['もう一軒！', 'ハシゴだ！', '朝まで！', 'ビールの雨！', '店員さん生！'],
+      area: ['大ジョッキ！', '樽ごと！'],
+      gap: ['そこしかないぞ', '逃げ場1つ！'],
+      intro: ['ハシゴ酒だ！'],
+    },
+    { // Lv.6 泥酔
+      throw: ['うぇ〜い！', 'ひっく！', 'わははは！', '何杯目だっけ', '分身したぞ'],
+      area: ['ひっく…ドバー', '酔拳！'],
+      gap: ['ここ以外ビール！', '狭いぞ〜'],
+      intro: ['2人に増えたぞ'],
+    },
+    { // Lv.7 記憶なし
+      throw: ['ここどこ？', '誰だっけ？', '記憶ないわ', 'ビール！ビール！', '世界が回る'],
+      area: ['覚えてない！', '無意識ドバー'],
+      gap: ['記憶の隙間へ', '逃げてみな'],
+      intro: ['なにも覚えてない'],
+    },
+    { // Lv.8 地獄の飲み会
+      throw: ['一気！一気！', '逃がさん！', '全員飲め！', '飲み放題だ！', 'ラストオーダー！'],
+      area: ['地獄の滝！', '飲み干せ！'],
+      gap: ['生き残れるか？', '地獄の一本道'],
+      intro: ['地獄へようこそ'],
+    },
+    { // Lv.9 クソゲー
+      throw: ['クソゲー開幕', '無理ゲーだ', '理不尽上等', 'よけるな！', 'これが現実'],
+      area: ['バグじゃないよ', '仕様です'],
+      gap: ['運ゲーだ！', '祈れ！'],
+      intro: ['ここからクソゲー'],
+    },
+    { // Lv.10〜 クソゲー極
+      throw: ['∞杯目！', 'ビールの神だ', '終わらせない', 'まだ生きてる？', '店ごと飲め！'],
+      area: ['ビールの海！', '神の一杯！'],
+      gap: ['奇跡を見せろ', '最後の楽園'],
+      intro: ['まだやるのか…'],
+    },
+  ];
+  const GAME_OVER_LINES = ['カンパーイ！', '乾杯成功！', 'いい飲みっぷり！', 'びしょ濡れ〜', 'もう一杯いく？'];
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  // そのレベルのセリフがなければ、前のレベルのセリフを使う
+  function line(kind, L) {
+    for (let i = Math.min(L, LINES.length) - 1; i >= 0; i--) {
+      if (LINES[i][kind]) return pick(LINES[i][kind]);
+    }
+    return 'それっ！';
+  }
+
   const $ = id => document.getElementById(id);
   const canvas = $('game');
   const ctx = canvas.getContext('2d');
@@ -431,7 +500,7 @@
   let dodged, level, throwTimer, areaTimer, levelPause, banner, shake, time, endTimer, deathBy, nextBoss;
 
   function makeBoss(x, dir) {
-    return { x, y: 92, r: 58, dir, windup: 0 };
+    return { x, y: 92, r: 58, dir, windup: 0, shout: '', shoutLife: 0 };
   }
 
   function reset() {
@@ -514,6 +583,7 @@
       bosses.push(makeBoss(b.x > W / 2 ? 80 : W - 80, -b.dir));
       popups.push({ x: W / 2, y: 230, text: 'もう1人きた！', life: 1.6, color: '#d9412b' });
     }
+    for (const b of bosses) say(b, line('intro', L), 1.6);
   }
 
   // ---------- 通常攻撃：ビールを投げる ----------
@@ -541,6 +611,8 @@
       });
     }
     boss.windup = 0.25;
+    // 前のセリフを読み切る前に次へ変わらないようにする
+    if (boss.shoutLife <= 0) say(boss, line('throw', level), 0.7);
     sfx.throw();
   }
 
@@ -595,6 +667,7 @@
       rects = [[0, safe[0]], [safe[1], W]];
     }
     areas.push({ rects, safe, t: 0, warn: p.warn, active: 0.6, poured: false });
+    say(bosses[0], line(safe ? 'gap' : 'area', level), p.warn + 0.3, true);
     sfx.warn();
   }
 
@@ -670,6 +743,7 @@
       if (b.x > W - b.r - 10) { b.x = W - b.r - 10; b.dir = -1; }
       if (b.x < b.r + 10) { b.x = b.r + 10; b.dir = 1; }
       if (b.windup > 0) b.windup -= dt;
+      if (b.shoutLife > 0) b.shoutLife -= dt;
     }
 
     if (levelPause > 0) levelPause -= dt;
@@ -742,8 +816,15 @@
     beers = beers.filter(b => !b.gone);
   }
 
+  function say(boss, text, life, loud = false) {
+    boss.shout = text;
+    boss.shoutLife = life;
+    boss.loud = loud;
+  }
+
   function gameOver() {
     state = 'over';
+    for (const b of bosses) say(b, pick(GAME_OVER_LINES), 99);
     pauseBtn.classList.remove('show');
     clearInput();
     player.hurt = true;
@@ -906,11 +987,22 @@
     ctx.arc(x, y, boss.r, 0, Math.PI * 2);
     ctx.stroke();
 
-    if (boss.windup > 0 && state === 'play') {
+    if (boss.shoutLife > 0 && state === 'play') {
+      // 画面の内側に向けて表示し、長いセリフは文字を小さくして収める
       const right = boss.x > W / 2;
-      outlinedText('それっ！', right ? x - boss.r - 6 : x + boss.r + 6, y - 10, 18, '#d9412b', right ? 'right' : 'left');
+      const tx = right ? x - boss.r - 6 : x + boss.r + 6;
+      const room = right ? tx - 4 : W - tx - 4;
+      const base = boss.loud ? 22 : 18;
+      ctx.font = `bold ${base}px sans-serif`;
+      const size = Math.max(11, Math.min(base, base * room / ctx.measureText(boss.shout).width));
+      outlinedText(boss.shout, tx, y - 10, size, boss.loud ? '#b8231a' : '#d9412b', right ? 'right' : 'left');
     }
-    if (state === 'over') outlinedText('カンパーイ！', x, y + boss.r + 34, 22, '#d9412b');
+    if (state === 'over') {
+      ctx.font = 'bold 22px sans-serif';
+      const size = Math.min(22, 22 * (W - 16) / ctx.measureText(boss.shout).width);
+      const cx = Math.max(ctx.measureText(boss.shout).width * size / 44 + 8, Math.min(W - ctx.measureText(boss.shout).width * size / 44 - 8, x));
+      outlinedText(boss.shout, cx, y + boss.r + 34, size, '#d9412b');
+    }
   }
 
   function drawBeer(b) {
