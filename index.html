@@ -998,20 +998,76 @@
     ctx.fillRect(-40, H - 30, W + 80, 4);
   }
 
+  // 範囲攻撃：巨大ジョッキが現れて傾き、ビールを流し込んでくる
+  const POUR_ANGLE = 125 * Math.PI / 180;
+  const easeOutBack = x => 1 + 2.2 * Math.pow(x - 1, 3) + 1.2 * Math.pow(x - 1, 2);
+
+  function drawGiantMug(px, py, w, h, angle, dir) {
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(angle);
+    // 取っ手（傾ける方向の反対側）
+    ctx.beginPath();
+    ctx.ellipse(-dir * (w / 2), h * 0.02, w * 0.24, h * 0.24, 0, Math.PI / 2, Math.PI * 1.5, dir > 0);
+    ctx.strokeStyle = 'rgba(120,80,30,.45)';
+    ctx.lineWidth = w * 0.13 + 4;
+    ctx.stroke();
+    ctx.strokeStyle = '#fffdf7';
+    ctx.lineWidth = w * 0.13;
+    ctx.stroke();
+    // ガラス
+    ctx.fillStyle = 'rgba(255,255,255,.6)';
+    roundRect(-w / 2, -h / 2, w, h, w * 0.12);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,80,30,.5)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    // ビール
+    const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+    g.addColorStop(0, '#f9c046');
+    g.addColorStop(1, '#d9820b');
+    ctx.fillStyle = g;
+    roundRect(-w / 2 + w * 0.08, -h / 2 + h * 0.16, w * 0.84, h * 0.76, w * 0.08);
+    ctx.fill();
+    // 泡（口からあふれる）
+    ctx.fillStyle = '#fffaf0';
+    ctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const fx = -w / 2 + w * (0.15 + i * 0.233);
+      ctx.moveTo(fx + w * 0.17, -h / 2 + h * 0.06);
+      ctx.arc(fx, -h / 2 + h * 0.06, w * 0.17, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.fillRect(-w / 2, -h / 2, w, h * 0.16);
+    // 泡の粒・ハイライト
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.fillRect(-w / 2 + w * 0.16, -h / 2 + h * 0.26, w * 0.09, h * 0.58);
+    ctx.fillStyle = 'rgba(255,240,200,.8)';
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.arc(-w * 0.2 + i * w * 0.11, h * 0.1 + ((time * 60 + i * 23) % (h * 0.3)), 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function drawAreas() {
     const top = AREA_TOP;
+    const floor = H - 30;
     for (const a of areas) {
-      if (a.t < a.warn) {
-        // 予告：赤く点滅するエリア
-        const blink = 0.18 + 0.17 * (0.5 + 0.5 * Math.sin(a.t * 30));
+      const warning = a.t < a.warn;
+
+      // 予告：落ちてくる場所を赤く点滅させる
+      if (warning) {
+        const blink = 0.12 + 0.12 * (0.5 + 0.5 * Math.sin(a.t * 30));
         for (const [x1, x2] of a.rects) {
           ctx.fillStyle = `rgba(217,65,43,${blink})`;
-          ctx.fillRect(x1, top, x2 - x1, H - 30 - top);
+          ctx.fillRect(x1, top, x2 - x1, floor - top);
           ctx.save();
           ctx.beginPath();
-          ctx.rect(x1, top, x2 - x1, H - 30 - top);
+          ctx.rect(x1, top, x2 - x1, floor - top);
           ctx.clip();
-          ctx.strokeStyle = 'rgba(217,65,43,.35)';
+          ctx.strokeStyle = 'rgba(217,65,43,.22)';
           ctx.lineWidth = 8;
           const off = (a.t * 80) % 32;
           for (let s = -H; s < W + H; s += 32) {
@@ -1021,38 +1077,108 @@
             ctx.stroke();
           }
           ctx.restore();
-          if (x2 - x1 > 40) outlinedText("⚠", (x1 + x2) / 2, top + 50, 28, '#d9412b');
+          if (x2 - x1 > 40) outlinedText('⚠', (x1 + x2) / 2, floor - 40, 26, '#d9412b');
         }
         if (a.safe) {
           const [g1, g2] = a.safe;
           ctx.fillStyle = 'rgba(80,190,90,.28)';
-          ctx.fillRect(g1, top, g2 - g1, H - 30 - top);
+          ctx.fillRect(g1, top, g2 - g1, floor - top);
           outlinedText('ここ！', (g1 + g2) / 2, H - 120, 18, '#2e8b3e');
         }
+      }
+
+      for (const [x1, x2] of a.rects) {
+        const rw = x2 - x1;
+        const cx = (x1 + x2) / 2;
+        // 画面の内側に体が来るように傾ける向きを決める
+        const dir = cx < W / 2 ? -1 : 1;
+        const w = Math.max(70, Math.min(120, rw * 0.6));
+        const h = w * 1.3;
+        const py = top + 4;
+        const px = cx - (h / 2) * Math.sin(dir * POUR_ANGLE);
+
+        // ジョッキの動き：上から登場 → 揺れながら少し傾く → 一気に傾けて注ぐ
+        let angle, enterY = 0;
+        if (warning) {
+          const e = Math.min(1, a.t / 0.28);
+          enterY = (1 - easeOutBack(e)) * -(py + h);
+          const tiltStart = a.warn - 0.14;
+          if (a.t < tiltStart) {
+            const ready = a.t / tiltStart;
+            angle = dir * (ready * 0.42 + Math.sin(a.t * 22) * 0.06 * ready);
+          } else {
+            const q = (a.t - tiltStart) / 0.14;
+            angle = dir * (0.42 + (POUR_ANGLE - 0.42) * q * q);
+          }
+        } else {
+          angle = dir * (POUR_ANGLE + Math.sin(time * 14) * 0.04);
+        }
+        const mx = px + (h / 2) * Math.sin(angle);
+        const my = py + enterY - (h / 2) * Math.cos(angle);
+
+        if (warning) {
+          // 傾きはじめると口から泡がこぼれる
+          if (Math.abs(angle) > 0.2) {
+            ctx.fillStyle = 'rgba(255,250,235,.9)';
+            for (let i = 0; i < 3; i++) {
+              const d = (a.t * 260 + i * 37) % 110;
+              ctx.beginPath();
+              ctx.arc(mx + Math.sin(i * 2.1) * 6, my + d, 3 + i, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        } else {
+          // 発動：口から流れ出たビールが、落ちる範囲いっぱいに広がる
+          const k = Math.min(1, (a.t - a.warn) / 0.12);
+          const spreadY = Math.min(floor, my + 80);
+          const bottom = my + (floor - my) * k;
+          const tw = w * 0.55;
+          const g = ctx.createLinearGradient(0, my, 0, floor);
+          g.addColorStop(0, 'rgba(249,192,70,.95)');
+          g.addColorStop(1, 'rgba(217,130,11,.95)');
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.moveTo(mx - tw / 2, my);
+          ctx.lineTo(mx + tw / 2, my);
+          if (bottom > spreadY) {
+            ctx.quadraticCurveTo(mx + tw / 2, spreadY - 30, x2, spreadY);
+            ctx.lineTo(x2, bottom);
+            ctx.lineTo(x1, bottom);
+            ctx.lineTo(x1, spreadY);
+            ctx.quadraticCurveTo(mx - tw / 2, spreadY - 30, mx - tw / 2, my);
+          } else {
+            const t2 = (bottom - my) / (spreadY - my);
+            ctx.lineTo(mx + tw / 2 + (x2 - mx - tw / 2) * t2, bottom);
+            ctx.lineTo(mx - tw / 2 + (x1 - mx + tw / 2) * t2, bottom);
+          }
+          ctx.closePath();
+          ctx.fill();
+          // 流れのすじ
+          ctx.save();
+          ctx.clip();
+          ctx.fillStyle = 'rgba(255,250,240,.5)';
+          for (let sx = x1 + 6; sx < x2 - 4; sx += 13) {
+            const off = ((a.t * 900) + sx * 7) % 80;
+            for (let sy = my - 80 + off; sy < bottom; sy += 80) ctx.fillRect(sx, sy, 3, 30);
+          }
+          ctx.restore();
+          // 床ではねる泡
+          if (k >= 1) {
+            ctx.fillStyle = '#fffaf0';
+            for (let fx = x1; fx < x2; fx += 16) {
+              ctx.beginPath();
+              ctx.arc(fx + 8, floor - 2, 9 + Math.sin(time * 20 + fx) * 3, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+        drawGiantMug(px, py + enterY, w, h, angle, dir);
+      }
+
+      if (warning) {
         // 残り時間バー
         ctx.fillStyle = '#d9412b';
         ctx.fillRect(0, top - 6, W * (1 - a.t / a.warn), 4);
-      } else {
-        // 発動：ビールの滝
-        const k = Math.min(1, (a.t - a.warn) / 0.12);
-        for (const [x1, x2] of a.rects) {
-          const g = ctx.createLinearGradient(0, 0, 0, H);
-          g.addColorStop(0, 'rgba(247,183,51,.9)');
-          g.addColorStop(1, 'rgba(217,130,11,.95)');
-          ctx.fillStyle = g;
-          ctx.fillRect(x1, 0, x2 - x1, (H - 30) * k);
-          ctx.fillStyle = 'rgba(255,250,240,.55)';
-          for (let sx = x1 + 6; sx < x2 - 4; sx += 14) {
-            const off = ((a.t * 900) + sx * 7) % 80;
-            for (let sy = -80 + off; sy < (H - 30) * k; sy += 80) ctx.fillRect(sx, sy, 3, 30);
-          }
-          ctx.fillStyle = '#fffaf0';
-          for (let fx = x1; fx < x2; fx += 16) {
-            ctx.beginPath();
-            ctx.arc(fx + 8, H - 32, 9 + Math.sin(time * 20 + fx) * 3, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
       }
     }
   }
