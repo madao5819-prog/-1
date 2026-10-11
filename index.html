@@ -540,7 +540,7 @@
     endScreen.classList.add('hidden');
     pauseScreen.classList.add('hidden');
     pauseBtn.classList.add('show');
-    banner = { title: 'Lv.1', sub: levelName(1), life: 1.4 };
+    banner = { text: `Lv.1 ${levelName(1)}`, life: 0.9, max: 0.9 };
   }
 
   function toTitle() {
@@ -585,13 +585,13 @@
     levelPause = 1.4;
     throwTimer = Math.max(throwTimer, 1.4);
     areaTimer = Math.max(areaTimer, 2.2);
-    banner = { title: `LEVEL UP!  Lv.${L}`, sub: levelName(L), life: 1.8 };
+    banner = { text: `LEVEL UP! Lv.${L} ${levelName(L)}`, life: 0.9, max: 0.9 };
     sfx.levelUp();
     // Lv.6 からビールをかけてくる人が2人になる
     if (L >= 6 && bosses.length < 2) {
       const b = bosses[0];
       bosses.push(makeBoss(b.x > W / 2 ? 80 : W - 80, -b.dir));
-      popups.push({ x: W / 2, y: AREA_TOP + 20, text: 'もう1人きた！', life: 1.6, color: '#d9412b' });
+      popups.push({ x: W / 2, y: AREA_TOP + 60, text: 'もう1人きた！', life: 1.6, color: '#d9412b' });
     }
     for (const b of bosses) say(b, line('intro', L), 1.6);
   }
@@ -1422,17 +1422,24 @@
     ctx.globalAlpha = 1;
 
     if (banner) {
-      const a = Math.min(1, banner.life * 2);
-      const pop = 1 + Math.max(0, banner.life - 1.4) * 0.6;
+      // 小さなバッジで一瞬だけ表示（盤面のじゃまをしない）
+      const a = Math.min(1, banner.life / 0.25);
+      const pop = 1 + Math.max(0, banner.life - (banner.max - 0.15)) * 2;
       ctx.globalAlpha = a;
-      ctx.fillStyle = 'rgba(43,26,14,.75)';
-      ctx.fillRect(0, H * 0.42 - 44, W, 92);
       ctx.save();
-      ctx.translate(W / 2, H * 0.42);
+      ctx.translate(W / 2, HUD_Y + 62);
       ctx.scale(pop, pop);
-      outlinedText(banner.title, 0, 0, 30, '#f2a516');
-      outlinedText(banner.sub, 0, 34, 20, level >= 9 ? '#d9412b' : '#3a2410');
+      ctx.font = 'bold 14px sans-serif';
+      const bw = ctx.measureText(banner.text).width + 22;
+      ctx.fillStyle = level >= 9 ? 'rgba(217,65,43,.9)' : 'rgba(43,26,14,.82)';
+      roundRect(-bw / 2, -13, bw, 26, 13);
+      ctx.fill();
+      ctx.fillStyle = level >= 9 ? '#fff7e6' : '#f2a516';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(banner.text, 0, 1);
       ctx.restore();
+      ctx.textBaseline = 'alphabetic';
       ctx.globalAlpha = 1;
     }
   }
