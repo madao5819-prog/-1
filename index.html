@@ -112,6 +112,36 @@
     z-index: 10;
   }
   .overlay.hidden { display: none; }
+  /* 画面が低いスマホでは中身をスクロールできるようにする */
+  .overlay { overflow-y: auto; touch-action: pan-y; }
+  .overlay > :first-child { margin-top: auto; }
+  .overlay > :last-child { margin-bottom: auto; }
+  .overlay a.buy {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 10px 26px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--ink);
+    font-weight: bold;
+    text-decoration: none;
+  }
+  .faceTools { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .faceTools button { min-width: 0 !important; margin-top: 0 !important; }
+  #cropScreen, #lockScreen { background: var(--bg); z-index: 25; }
+  #cropCanvas { border-radius: 50%; border: 5px solid var(--accent); touch-action: none; background: #222; }
+  #cropZoom { width: 230px; accent-color: var(--accent); }
+  .overlay input[type=text] {
+    font: inherit;
+    font-size: 20px;
+    width: 240px;
+    padding: 12px 16px;
+    border-radius: 14px;
+    border: 3px solid var(--accent);
+    text-align: center;
+    background: var(--panel);
+    color: var(--ink);
+  }
   .overlay h1 {
     margin: 0;
     font-size: 42px;
@@ -171,7 +201,7 @@
 <div class="overlay" id="startScreen">
   <img class="face" src="face.jpg" alt="">
   <h1>ビールよけ</h1>
-  <p>あいつがビールをかけてくる！<br>10杯よけるごとにレベルアップ<br>1杯でも浴びたらゲームオーバー</p>
+  <p>あいつがビールをかけてくる！<br>よけるほどレベルアップ<br>1杯でも浴びたらゲームオーバー</p>
   <p class="small">⚠ 赤いエリアは「範囲攻撃」。すぐ逃げろ！</p>
   <p class="small">◀ ▶ ボタンを押す or 画面をなぞって動かす</p>
   <p class="best" id="bestText"></p>
@@ -258,7 +288,7 @@
       intro: ['なにも覚えてない'],
     },
     { // Lv.8 地獄の飲み会
-      throw: ['一気！一気！', '逃がさん！', '全員飲め！', '飲み放題だ！', 'ラストオーダー！'],
+      throw: ['おかわり自由！', '逃がさん！', '全員飲め！', '飲み放題だ！', 'ラストオーダー！'],
       area: ['地獄の滝！', '飲み干せ！'],
       gap: ['生き残れるか？', '地獄の一本道'],
       intro: ['地獄へようこそ'],
@@ -286,6 +316,16 @@
     return 'それっ！';
   }
 
+  // 版ごとの設定（体験版・製品版はビルド時に GAME_CONFIG を差し込む）
+  //   variant: 記録や顔写真の保存先を版ごとに分ける名前
+  //   face: 最初の顔画像 / faceSwap: 顔写真の差し替え機能
+  //   maxLevel: 体験版の上限レベル（0 なら無制限） / buyUrl: 製品版の購入ページ
+  const CFG = Object.assign(
+    { variant: 'main', face: 'face.jpg', faceSwap: false, maxLevel: 0, buyUrl: '' },
+    window.GAME_CONFIG || {}
+  );
+  const storeKey = name => 'beer-dodge-' + name + (CFG.variant === 'main' ? '' : '-' + CFG.variant);
+
   const $ = id => document.getElementById(id);
   const canvas = $('game');
   const ctx = canvas.getContext('2d');
@@ -296,10 +336,18 @@
   const pauseBtn = $('pauseBtn');
 
   const faceImg = new Image();
-  faceImg.src = 'face.jpg';
+  function setFace(src) {
+    faceImg.src = src;
+    document.querySelectorAll('img.face').forEach(img => { img.src = src; });
+  }
+  let customFace = null;
+  if (CFG.faceSwap) {
+    try { customFace = localStorage.getItem(storeKey('face')); } catch (_) {}
+  }
+  setFace(customFace || CFG.face);
 
   // ---------- 記録 ----------
-  const BEST_KEY = 'beer-dodge-best';
+  const BEST_KEY = storeKey('best');
   function loadBest() {
     try {
       const b = JSON.parse(localStorage.getItem(BEST_KEY)) || {};
@@ -581,6 +629,7 @@
   }
 
   function levelUp(L) {
+    if (CFG.maxLevel && L > CFG.maxLevel) { demoEnd(); return; }
     level = L;
     levelPause = 1.4;
     throwTimer = Math.max(throwTimer, 1.4);
@@ -917,6 +966,26 @@
     boss.shout = text;
     boss.shoutLife = life;
     boss.loud = loud;
+  }
+
+  // 体験版の上限レベルをクリアしたとき
+  function demoEnd() {
+    state = 'over';
+    for (const b of bosses) say(b, '続きは製品版で！', 99);
+    pauseBtn.classList.remove('show');
+    clearInput();
+    sfx.levelUp();
+    const newBest = dodged > best.score;
+    if (newBest) { best = { score: dodged, level }; saveBest(best); }
+    setTimeout(() => {
+      $('endTitle').textContent = '体験版はここまで！';
+      $('endText').innerHTML =
+        `Lv.${CFG.maxLevel} クリア！ よけた数：<b>${dodged}</b> 杯<br>` +
+        `製品版はクソゲー級の Lv.9 以降まで<br>どこまでも続く。<br>` +
+        `<b>好きな人の顔写真</b>にも差し替えられる！` +
+        (CFG.buyUrl ? `<br><a class="buy" href="${CFG.buyUrl}" target="_blank" rel="noopener">製品版を見る</a>` : '');
+      endScreen.classList.remove('hidden');
+    }, 900);
   }
 
   function gameOver() {
@@ -1468,6 +1537,130 @@
     ctx.restore();
   }
 
+  // ---------- 体験版のお知らせ ----------
+  if (CFG.maxLevel) {
+    const note = document.createElement('p');
+    note.className = 'small';
+    note.innerHTML = `体験版：Lv.${CFG.maxLevel} まで遊べます<br>製品版は全レベル＋好きな人の顔に差し替え`;
+    startScreen.insertBefore(note, $('startBtn'));
+  }
+
+  // ---------- 顔写真の差し替え（製品版） ----------
+  // 写真はスマホの中だけで使い、どこにも送らない
+  if (CFG.faceSwap) setupFaceSwap();
+
+  function setupFaceSwap() {
+    const tools = document.createElement('div');
+    tools.className = 'faceTools';
+    tools.innerHTML =
+      '<button class="sub" id="pickFaceBtn">📷 顔写真をえらぶ</button>' +
+      '<button class="sub" id="resetFaceBtn">元の顔にもどす</button>' +
+      '<input type="file" id="faceFile" accept="image/*" hidden>';
+    startScreen.insertBefore(tools, $('startBtn'));
+
+    const crop = document.createElement('div');
+    crop.className = 'overlay hidden';
+    crop.id = 'cropScreen';
+    crop.innerHTML =
+      '<h1 style="font-size:28px">顔の位置を合わせよう</h1>' +
+      '<p class="small">ドラッグで移動、スライダーで拡大</p>' +
+      '<canvas id="cropCanvas" width="520" height="520" style="width:260px;height:260px"></canvas>' +
+      '<input type="range" id="cropZoom" min="1" max="4" step="0.01" value="1">' +
+      '<button id="cropOk">この顔にする</button>' +
+      '<button class="sub" id="cropCancel">やめる</button>';
+    document.body.appendChild(crop);
+
+    const file = $('faceFile');
+    const resetBtn = $('resetFaceBtn');
+    const cv = $('cropCanvas');
+    const cx2 = cv.getContext('2d');
+    const zoom = $('cropZoom');
+    const SIZE = 520;
+    let img = null, ox = 0, oy = 0, drag = null;
+
+    const refreshReset = () => { resetBtn.style.display = customFace ? '' : 'none'; };
+    refreshReset();
+
+    function layout() {
+      const base = Math.max(SIZE / img.naturalWidth, SIZE / img.naturalHeight);
+      const sc = base * parseFloat(zoom.value);
+      const dw = img.naturalWidth * sc, dh = img.naturalHeight * sc;
+      // 円の中に必ず写真がかかるように移動量を制限
+      ox = Math.max(-(dw - SIZE) / 2, Math.min((dw - SIZE) / 2, ox));
+      oy = Math.max(-(dh - SIZE) / 2, Math.min((dh - SIZE) / 2, oy));
+      return { x: SIZE / 2 - dw / 2 + ox, y: SIZE / 2 - dh / 2 + oy, dw, dh };
+    }
+    function drawCrop() {
+      const l = layout();
+      cx2.clearRect(0, 0, SIZE, SIZE);
+      cx2.drawImage(img, l.x, l.y, l.dw, l.dh);
+    }
+
+    $('pickFaceBtn').addEventListener('click', () => file.click());
+    file.addEventListener('change', () => {
+      const f = file.files && file.files[0];
+      file.value = '';
+      if (!f) return;
+      const url = URL.createObjectURL(f);
+      const im = new Image();
+      im.onload = () => {
+        img = im; ox = 0; oy = 0; zoom.value = 1;
+        drawCrop();
+        crop.classList.remove('hidden');
+      };
+      im.onerror = () => { URL.revokeObjectURL(url); alert('この画像は読み込めませんでした'); };
+      im.src = url;
+    });
+
+    zoom.addEventListener('input', () => img && drawCrop());
+    cv.addEventListener('pointerdown', e => {
+      drag = { x: e.clientX, y: e.clientY, ox, oy };
+      try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    cv.addEventListener('pointermove', e => {
+      if (!drag || !img) return;
+      const k = SIZE / cv.getBoundingClientRect().width;
+      ox = drag.ox + (e.clientX - drag.x) * k;
+      oy = drag.oy + (e.clientY - drag.y) * k;
+      drawCrop();
+    });
+    const endDrag = () => { drag = null; };
+    cv.addEventListener('pointerup', endDrag);
+    cv.addEventListener('pointercancel', endDrag);
+    cv.addEventListener('wheel', e => {
+      e.preventDefault();
+      zoom.value = Math.max(1, Math.min(4, parseFloat(zoom.value) - e.deltaY * 0.002));
+      if (img) drawCrop();
+    }, { passive: false });
+
+    function closeCrop() {
+      crop.classList.add('hidden');
+      if (img) URL.revokeObjectURL(img.src);
+      img = null;
+    }
+    $('cropCancel').addEventListener('click', closeCrop);
+    $('cropOk').addEventListener('click', () => {
+      if (!img) return;
+      const out = document.createElement('canvas');
+      out.width = out.height = 320;
+      const l = layout();
+      const k = 320 / SIZE;
+      out.getContext('2d').drawImage(img, l.x * k, l.y * k, l.dw * k, l.dh * k);
+      const data = out.toDataURL('image/jpeg', 0.85);
+      customFace = data;
+      try { localStorage.setItem(storeKey('face'), data); } catch (_) {}
+      setFace(data);
+      refreshReset();
+      closeCrop();
+    });
+    resetBtn.addEventListener('click', () => {
+      customFace = null;
+      try { localStorage.removeItem(storeKey('face')); } catch (_) {}
+      setFace(CFG.face);
+      refreshReset();
+    });
+  }
+
   // ---------- ループ ----------
   reset();
   resize();
@@ -1483,9 +1676,9 @@
 
   // オフラインでも遊べるように、ファイルをスマホに保存しておく
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    });
+    const register = () => navigator.serviceWorker.register('sw.js').catch(() => {});
+    if (document.readyState === 'complete') register();
+    else window.addEventListener('load', register);
   }
 })();
 </script>
