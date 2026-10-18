@@ -879,7 +879,8 @@
 
     // 複数投げるときは、角度を考えて「人が入れるすき間」が必ずできる間隔で並べる。
     // 端から斜めに投げたビールは横に流れるぶん、間隔を広く取る（等間隔にはならない）。
-    const GAP = 52;
+    // 通れるすき間の幅。2方向・3方向はやさしく広め、5方向は狭め
+    const GAP = p.fan >= 5 ? 52 : 95;
     const dy = player.y - sy;
     const zoneOf = lx => dangerZone(lx, (lx - sx) / dy);
     function layout(center) {
