@@ -232,13 +232,13 @@
 (() => {
   const W = 400;
   let H = 640;
-  // Lv.1 は5杯、Lv.2 は7杯、Lv.3 以降は10杯ごとにレベルアップ
-  const LEVEL_SIZES = [5, 7];
+  // レベルアップに必要な杯数：Lv.1 は5杯、Lv.2 は7杯、Lv.3〜8 は10杯。
+  // Lv.9 からは15杯、そこから1レベルごとに3杯ずつ増える（後半の名前をじっくり味わえるように）
+  const levelSize = L => L === 1 ? 5 : L === 2 ? 7 : L <= 8 ? 10 : 15 + (L - 9) * 3;
   // 画面上部のレイアウト（顔を小さくして盤面を広く）
   const BOSS_Y = 66, BOSS_R = 40;
   const HUD_Y = 122;
   const AREA_TOP = HUD_Y + 50;
-  const levelSize = L => LEVEL_SIZES[L - 1] || 10;
   function levelStart(L) {
     let s = 0;
     for (let i = 1; i < L; i++) s += levelSize(i);
@@ -249,6 +249,8 @@
   const LEVEL_NAMES = ['ほろ酔い', '一杯目', 'ほろほろ', '二次会', 'ハシゴ酒', '泥酔', '記憶なし', '地獄の飲み会',
     '終電なし', '朝まで', '迎え酒', 'ザル', 'うわばみ', '酒呑童子', 'バッカス', 'ヤマタノオロチ', '素戔嗚尊'];
   const levelName = L => LEVEL_NAMES[Math.min(L, LEVEL_NAMES.length) - 1];
+  // 最後のレベル（素戔嗚尊）を越えたらクリア。その後は無限に続けられる
+  const CLEAR_LEVEL = LEVEL_NAMES.length;
 
   // ---------- セリフ（レベルごとに変わる） ----------
   // throw: 投げるとき / area: 範囲攻撃 / gap: 安全地帯以外ぜんぶ / intro: レベルアップ時
@@ -418,8 +420,8 @@
   function loadBest() {
     try {
       const b = JSON.parse(localStorage.getItem(BEST_KEY)) || {};
-      return { score: b.score || b.dodged || 0, level: b.level || 1 };
-    } catch (_) { return { score: 0, level: 1 }; }
+      return { score: b.score || b.dodged || 0, level: b.level || 1, cleared: !!b.cleared, clears: b.clears || 0 };
+    } catch (_) { return { score: 0, level: 1, cleared: false, clears: 0 }; }
   }
   function saveBest(b) {
     try { localStorage.setItem(BEST_KEY, JSON.stringify(b)); } catch (_) {}
@@ -427,7 +429,8 @@
   let best = loadBest();
   function showBest() {
     $('bestText').textContent = best.score > 0
-      ? `ベスト：${best.score}杯（Lv.${best.level} ${levelName(best.level)}）`
+      ? `ベスト：${best.score}杯（Lv.${best.level} ${levelName(best.level)}）` +
+        (best.cleared ? `　👑全制覇 ${best.clears}回` : '')
       : '';
   }
   showBest();
@@ -436,7 +439,7 @@
   // レベルが上がるほど速く・多く・容赦なくなる。Lv.9 以降はかなり理不尽。
   function params(L, inLevel) {
     return {
-      speed: Math.min(980, 240 + L * 55 + inLevel * 4),
+      speed: Math.min(980, 240 + L * 55 + Math.min(inLevel, 10) * 4),
       interval: Math.max(0.16, 1.3 - L * 0.13),
       fan: L >= 9 ? 5
          : L >= 7 ? (Math.random() < 0.5 ? 3 : 5)
@@ -501,6 +504,7 @@
     area: () => { beep(1046, 0.1, 'square', 0.04); vibrate(25); },
     slip: () => { beep(1318, 0.07, 'square', 0.04); setTimeout(() => beep(1760, 0.09, 'square', 0.04), 70); vibrate([15, 30, 15]); },
     splash: () => { beep(200, 0.5, 'sawtooth', 0.08, -150); beep(120, 0.6, 'square', 0.05, -60); vibrate([120, 60, 220]); },
+    clear: () => { [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => setTimeout(() => beep(f, 0.22, 'square', 0.06), i * 140)); vibrate([60, 40, 60, 40, 200]); },
     levelUp: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.16, 'square', 0.05), i * 100)); vibrate([30, 30, 30, 30, 80]); },
   };
   function unlockAudio() {
@@ -617,7 +621,7 @@
   let state = 'title';
   let paused = false;
   let player, bosses, beers, areas, particles, popups;
-  let dodged, level, throwTimer, areaTimer, levelPause, banner, shake, time, endTimer, deathBy, nextBoss, lastStyle;
+  let dodged, level, throwTimer, areaTimer, levelPause, banner, shake, time, endTimer, deathBy, nextBoss, lastStyle, cleared;
   let volleys, volleyId;
 
   function makeBoss(x, dir) {
@@ -627,6 +631,8 @@
   function reset() {
     player = { x: W / 2, y: H - 70, w: 34, h: 56, face: 1, step: 0, hurt: false };
     bosses = [makeBoss(W / 2, 1)];
+    bg = null;
+    lightning = 0;
     beers = [];
     areas = [];
     particles = [];
@@ -642,6 +648,7 @@
     endTimer = 0;
     deathBy = '';
     lastStyle = 'beer';
+    cleared = false;
     nextBoss = 0;
     volleys = new Map();
     volleyId = 0;
@@ -693,7 +700,34 @@
   function addDodge(text, x, y, n = 1, big = false, color) {
     dodged += n;
     popups.push({ x, y, text, life: big ? 1.1 : 0.7, size: big ? 24 : 16, color: color || (big ? '#e08a00' : undefined) });
-    if (dodged >= levelStart(level + 1)) levelUp(level + 1);
+    if (cleared) return;
+    if (level < CLEAR_LEVEL && dodged >= levelStart(level + 1)) levelUp(level + 1);
+    else if (level >= CLEAR_LEVEL && dodged >= levelStart(CLEAR_LEVEL + 1)) gameClear();
+  }
+
+  // 素戔嗚尊を越えた！（ゲームはそのまま続く）
+  function gameClear() {
+    cleared = true;
+    levelPause = 2;
+    throwTimer = Math.max(throwTimer, 2);
+    areaTimer = Math.max(areaTimer, 3);
+    banner = { text: '全制覇！ 素戔嗚尊を超えた！', life: 2.6, max: 2.6 };
+    popups.push({ x: W / 2, y: H * 0.45, text: '🎉 全制覇！ 🎉', life: 2.2, size: 34, color: '#e8b33a' });
+    popups.push({ x: W / 2, y: H * 0.45 + 40, text: 'ここからは無限の宴…', life: 2.2, size: 18, color: '#d9412b' });
+    for (const b of bosses) say(b, '見事なり…', 2);
+    for (let k = 0; k < 120; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 150 + Math.random() * 350;
+      particles.push({
+        x: W / 2, y: H * 0.4, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 200,
+        life: 1 + Math.random(), max: 2, r: 2 + Math.random() * 4,
+        color: ['#e8b33a', '#fff7e6', '#d9412b', '#7cc4ff'][k % 4],
+      });
+    }
+    sfx.clear();
+    best.cleared = true;
+    best.clears = (best.clears || 0) + 1;
+    saveBest(best);
   }
 
   function levelUp(L) {
@@ -905,6 +939,7 @@
   // ---------- 更新 ----------
   function update(dt) {
     time += dt;
+    updateBackground(dt);
     if (shake > 0) shake = Math.max(0, shake - dt * 30);
 
     for (const p of particles) {
@@ -1049,7 +1084,7 @@
     clearInput();
     sfx.levelUp();
     const newBest = dodged > best.score;
-    if (newBest) { best = { score: dodged, level }; saveBest(best); }
+    if (newBest) { best = { ...best, score: dodged, level }; saveBest(best); }
     setTimeout(() => {
       $('endTitle').textContent = '体験版はここまで！';
       $('endText').innerHTML =
@@ -1071,10 +1106,11 @@
     addSplash(player.x, player.y - 20, 90, true, lastStyle);
     sfx.splash();
     const newBest = dodged > best.score;
-    if (newBest) { best = { score: dodged, level }; saveBest(best); }
+    if (newBest) { best = { ...best, score: dodged, level }; saveBest(best); }
     setTimeout(() => {
       $('endTitle').textContent = 'ビールまみれ…';
       $('endText').innerHTML =
+        (cleared ? '🎉 <b>全制覇達成！</b><br>' : '') +
         `${deathBy}<br>` +
         `よけた数：<b>${dodged}</b> 杯${newBest ? '（自己ベスト！）' : ''}<br>` +
         `到達：<b>Lv.${level} ${levelName(level)}</b><br>` +
@@ -1104,14 +1140,80 @@
     ctx.fillText(text, x, y);
   }
 
-  function drawBackground() {
-    const g = ctx.createLinearGradient(0, 0, 0, H);
+  // 神様エリアの背景（バッカス：ワイン色の夜／オロチ：暗い沼／素戔嗚尊：嵐の夜）
+  const BG_THEMES = {
+    bacchus: { top: [46, 12, 36], bottom: [88, 26, 58], floor: [70, 36, 52] },
+    orochi:  { top: [10, 30, 24], bottom: [34, 56, 42], floor: [52, 52, 34] },
+    susanoo: { top: [10, 14, 40], bottom: [32, 36, 74], floor: [40, 40, 64] },
+  };
+  let bg = null;
+  let lightning = 0, nextLightning = 3;
+  function bgTarget() {
+    const theme = BG_THEMES[styleFor(level)];
+    if (theme) return { top: theme.top, bottom: theme.bottom, floor: theme.floor, god: 1 };
     // レベルが上がると店内がだんだん赤く（酔って）くる
     const heat = Math.min(1, (level - 1) / 8);
-    g.addColorStop(0, `rgb(${243}, ${Math.round(223 - heat * 60)}, ${Math.round(182 - heat * 90)})`);
-    g.addColorStop(1, `rgb(${230}, ${Math.round(196 - heat * 70)}, ${Math.round(140 - heat * 80)})`);
+    return {
+      top: [243, 223 - heat * 60, 182 - heat * 90],
+      bottom: [230, 196 - heat * 70, 140 - heat * 80],
+      floor: [176, 122, 63],
+      god: 0,
+    };
+  }
+  function updateBackground(dt) {
+    const t = bgTarget();
+    if (!bg) bg = { top: [...t.top], bottom: [...t.bottom], floor: [...t.floor], god: t.god };
+    const k = 1 - Math.exp(-dt * 2.5);
+    for (const key of ['top', 'bottom', 'floor']) {
+      for (let i = 0; i < 3; i++) bg[key][i] += (t[key][i] - bg[key][i]) * k;
+    }
+    bg.god += (t.god - bg.god) * k;
+    // 素戔嗚尊のステージは嵐。ときどき稲妻が光る
+    if (lightning > 0) lightning = Math.max(0, lightning - dt * 3);
+    if (styleFor(level) === 'susanoo' && state === 'play') {
+      nextLightning -= dt;
+      if (nextLightning <= 0) { lightning = 1; nextLightning = 3 + Math.random() * 4; }
+    }
+  }
+  const rgb = (c, shade = 0) => `rgb(${Math.round(c[0] + shade)}, ${Math.round(c[1] + shade)}, ${Math.round(c[2] + shade)})`;
+
+  function drawBackground() {
+    if (!bg) updateBackground(0);
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, rgb(bg.top));
+    g.addColorStop(1, rgb(bg.bottom));
     ctx.fillStyle = g;
     ctx.fillRect(-40, -40, W + 80, H + 80);
+
+    // 神様エリアは星がまたたく
+    if (bg.god > 0.05) {
+      for (let i = 0; i < 40; i++) {
+        const sx = (i * 97.3) % W;
+        const sy = (i * 53.7) % (H * 0.7);
+        ctx.globalAlpha = bg.god * (0.3 + 0.5 * (0.5 + 0.5 * Math.sin(time * 2 + i)));
+        ctx.fillStyle = '#fff7e6';
+        ctx.fillRect(sx, sy, 2, 2);
+      }
+      ctx.globalAlpha = 1;
+    }
+    // 稲妻
+    if (lightning > 0) {
+      ctx.fillStyle = `rgba(220,230,255,${lightning * 0.35})`;
+      ctx.fillRect(-40, -40, W + 80, H + 80);
+      if (lightning > 0.6) {
+        ctx.strokeStyle = `rgba(255,255,255,${lightning})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        let lx = W * (0.2 + 0.6 * ((nextLightning * 7) % 1)), ly = 0;
+        ctx.moveTo(lx, ly);
+        while (ly < H * 0.35) {
+          ly += 25;
+          lx += ((ly * 13) % 30) - 15;
+          ctx.lineTo(lx, ly);
+        }
+        ctx.stroke();
+      }
+    }
 
     for (let i = 0; i < 4; i++) {
       const x = 50 + i * 100;
@@ -1132,11 +1234,11 @@
       ctx.restore();
     }
 
-    ctx.fillStyle = '#b07a3f';
+    ctx.fillStyle = rgb(bg.floor);
     ctx.fillRect(-40, H - 30, W + 80, 70);
-    ctx.fillStyle = '#8c5a28';
+    ctx.fillStyle = rgb(bg.floor, -36);
     for (let x = 0; x < W; x += 50) ctx.fillRect(x, H - 30, 2, 30);
-    ctx.fillStyle = '#c99257';
+    ctx.fillStyle = rgb(bg.floor, 25);
     ctx.fillRect(-40, H - 30, W + 80, 4);
   }
 
@@ -1791,7 +1893,7 @@
     for (const p of particles) {
       ctx.globalAlpha = Math.max(0, Math.min(1, p.life / p.max * 1.5));
       const d = DRINKS[p.d || 'beer'];
-      ctx.fillStyle = p.foam ? d.foam : d.liquid;
+      ctx.fillStyle = p.color || (p.foam ? d.foam : d.liquid);
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
@@ -1801,10 +1903,10 @@
 
   function drawHUD() {
     // レベル表示
-    const lv = `Lv.${level} ${levelName(level)}`;
+    const lv = cleared ? `👑 全制覇 ∞` : `Lv.${level} ${levelName(level)}`;
     ctx.font = 'bold 15px sans-serif';
     const lw = ctx.measureText(lv).width;
-    ctx.fillStyle = level >= 9 ? 'rgba(217,65,43,.9)' : 'rgba(58,36,16,.85)';
+    ctx.fillStyle = cleared ? 'rgba(160,110,20,.95)' : level >= 9 ? 'rgba(217,65,43,.9)' : 'rgba(58,36,16,.85)';
     roundRect(10, HUD_Y, lw + 20, 28, 14);
     ctx.fill();
     ctx.fillStyle = '#fff7e6';
@@ -1821,14 +1923,30 @@
     ctx.fillStyle = '#fff7e6';
     ctx.fillText(label, W - tw - 22, HUD_Y + 20);
 
-    // 次のレベルまでのジョッキゲージ
+    // 次のレベルまでのゲージ（10杯まではジョッキ、それより多いときは棒）
+    const size = levelSize(level);
     const inLevel = dodged - levelStart(level);
-    for (let i = 0; i < levelSize(level); i++) {
-      const x = 12 + i * 13;
-      const y = HUD_Y + 34;
-      ctx.fillStyle = i < inLevel ? '#f2a516' : 'rgba(58,36,16,.22)';
-      roundRect(x, y, 9, 12, 2);
+    const gy = HUD_Y + 34;
+    const empty = bg && bg.god > 0.5 ? 'rgba(255,247,230,.25)' : 'rgba(58,36,16,.22)';
+    if (cleared) {
+      outlinedText('宴は続く…', 60, gy + 11, 13, '#a06e14');
+    } else if (size <= 10) {
+      for (let i = 0; i < size; i++) {
+        ctx.fillStyle = i < inLevel ? '#f2a516' : empty;
+        roundRect(12 + i * 13, gy, 9, 12, 2);
+        ctx.fill();
+      }
+    } else {
+      ctx.fillStyle = empty;
+      roundRect(12, gy + 2, 126, 9, 4.5);
       ctx.fill();
+      ctx.fillStyle = '#f2a516';
+      roundRect(12, gy + 2, Math.max(9, 126 * Math.min(1, inLevel / size)), 9, 4.5);
+      ctx.fill();
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillStyle = bg && bg.god > 0.5 ? '#fff7e6' : '#3a2410';
+      ctx.textAlign = 'left';
+      ctx.fillText(`${inLevel}/${size}`, 144, gy + 11);
     }
 
     for (const p of popups) {
