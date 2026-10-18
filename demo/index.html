@@ -353,6 +353,28 @@
       intro: ['素戔嗚尊、見参'],
     },
   ];
+  // ---------- お酒の種類（神様レベルはちなんだお酒に変わる） ----------
+  const DRINKS = {
+    beer: { name: 'ビール', liquid: '#f2a516', foam: '#fffaf0', top: '#f9c046', bottom: '#d9820b', rgb: '242,165,22',
+            drip: 'rgba(255,250,235,.9)', streak: 'rgba(255,250,240,.5)', edge: 'rgba(180,110,10,.4)' },
+    wine: { name: 'ワイン', liquid: '#9b1d42', foam: '#e07a98', top: '#b3264f', bottom: '#5e0b26', rgb: '155,29,66',
+            drip: 'rgba(155,29,66,.9)', streak: 'rgba(255,180,200,.3)', edge: 'rgba(60,0,20,.5)' },
+    sake: { name: '日本酒', liquid: '#bfe0ef', foam: '#ffffff', top: '#f2fbff', bottom: '#a3cde2', rgb: '150,200,225',
+            drip: 'rgba(205,232,245,.95)', streak: 'rgba(255,255,255,.8)', edge: 'rgba(80,130,160,.7)' },
+  };
+  // レベルごとの「投げてくる器」と「範囲攻撃で注いでくる容器」
+  const STYLES = {
+    beer:    { drink: 'beer', cup: 'mug',       pourer: 'bottle' },     // ジョッキとビール瓶
+    bacchus: { drink: 'wine', cup: 'wineglass', pourer: 'winebottle' }, // バッカス：ワイングラスとワインボトル
+    orochi:  { drink: 'sake', cup: 'masu',      pourer: 'taru' },       // ヤマタノオロチ：升と酒樽
+    susanoo: { drink: 'sake', cup: 'sakazuki',  pourer: 'tokkuri' },    // 素戔嗚尊：朱塗りの盃と大徳利（八塩折の酒）
+  };
+  function styleFor(L) {
+    const name = levelName(L);
+    return name === '素戔嗚尊' ? 'susanoo' : name === 'ヤマタノオロチ' ? 'orochi' : name === 'バッカス' ? 'bacchus' : 'beer';
+  }
+  const drinkOf = style => DRINKS[STYLES[style || 'beer'].drink];
+
   const GAME_OVER_LINES = ['カンパーイ！', '乾杯成功！', 'いい飲みっぷり！', 'びしょ濡れ〜', 'もう一杯いく？'];
   const pick = a => a[Math.floor(Math.random() * a.length)];
   // そのレベルのセリフがなければ、前のレベルのセリフを使う
@@ -597,7 +619,7 @@
   let state = 'title';
   let paused = false;
   let player, bosses, beers, areas, particles, popups;
-  let dodged, level, throwTimer, areaTimer, levelPause, banner, shake, time, endTimer, deathBy, nextBoss;
+  let dodged, level, throwTimer, areaTimer, levelPause, banner, shake, time, endTimer, deathBy, nextBoss, lastStyle;
   let volleys, volleyId;
 
   function makeBoss(x, dir) {
@@ -621,6 +643,7 @@
     time = 0;
     endTimer = 0;
     deathBy = '';
+    lastStyle = 'beer';
     nextBoss = 0;
     volleys = new Map();
     volleyId = 0;
@@ -777,6 +800,7 @@
         rot: 0,
         spin: (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 4),
         vid,
+        style: styleFor(level),
       });
     }
     boss.windup = 0.25;
@@ -835,7 +859,7 @@
       safe = [bestC - gw / 2, bestC + gw / 2];
       rects = [[0, safe[0]], [safe[1], W]];
     }
-    areas.push({ rects, safe, t: 0, warn: p.warn, active: 0.6, poured: false });
+    areas.push({ rects, safe, t: 0, warn: p.warn, active: 0.6, poured: false, style: styleFor(level) });
     say(bosses[0], line(safe ? 'gap' : 'area', level), p.warn + 0.3, true);
     sfx.warn();
   }
@@ -846,7 +870,8 @@
     return a.rects.some(([x1, x2]) => player.x > x1 + m && player.x < x2 - m);
   }
 
-  function addSplash(x, y, n, big) {
+  function addSplash(x, y, n, big, style) {
+    const d = STYLES[style || 'beer'].drink;
     for (let k = 0; k < n; k++) {
       const a = Math.random() * Math.PI * 2;
       const s = (big ? 120 : 40) + Math.random() * (big ? 260 : 80);
@@ -858,6 +883,7 @@
         max: 1.2,
         r: 2 + Math.random() * (big ? 6 : 3),
         foam: Math.random() < 0.35,
+        d,
       });
     }
   }
@@ -949,13 +975,14 @@
       if (a.t >= a.warn) {
         if (!a.poured) { a.poured = true; sfx.pour(); shake = Math.max(shake, 4); }
         if (inArea(a)) {
-          deathBy = 'ビールの滝に飲まれた…';
+          lastStyle = a.style;
+          deathBy = `${drinkOf(a.style).name}の滝に飲まれた…`;
           gameOver();
           return;
         }
         if (Math.random() < 0.6) {
           const [x1, x2] = a.rects[Math.floor(Math.random() * a.rects.length)];
-          addSplash(x1 + Math.random() * (x2 - x1), H - 30, 2, false);
+          addSplash(x1 + Math.random() * (x2 - x1), H - 30, 2, false, a.style);
         }
       }
       if (a.t >= a.warn + a.active) {
@@ -973,7 +1000,7 @@
       b.y += b.vy * dt;
       b.rot += b.spin * dt;
       if (Math.random() < 0.4) {
-        particles.push({ x: b.x, y: b.y, vx: (Math.random() - 0.5) * 30, vy: -20, life: 0.4, max: 0.4, r: 2 + Math.random() * 2, foam: Math.random() < 0.5 });
+        particles.push({ x: b.x, y: b.y, vx: (Math.random() - 0.5) * 30, vy: -20, life: 0.4, max: 0.4, r: 2 + Math.random() * 2, foam: Math.random() < 0.5, d: STYLES[b.style].drink });
       }
       // 人の高さを通過した瞬間に、ビールが左右どちらを通ったか記録
       if (!b.crossed && b.y >= player.y - 4) {
@@ -982,7 +1009,8 @@
         if (v) { if (b.x < player.x) v.left = true; else v.right = true; }
       }
       if (rectHit(b)) {
-        deathBy = 'ビールを頭からかぶった…';
+        lastStyle = b.style;
+        deathBy = `${drinkOf(b.style).name}を頭からかぶった…`;
         gameOver();
         return;
       }
@@ -991,7 +1019,7 @@
       if (passed || out) {
         b.gone = true;
         sfx.dodge();
-        if (passed) addSplash(b.x, H - 14, 8, false);
+        if (passed) addSplash(b.x, H - 14, 8, false, b.style);
         addDodge('よけた！', player.x, player.y - 50);
         if (state !== 'play') return;
         // 同じ投げのビールが全部通り過ぎたとき、左右両方を通っていたら「すり抜け」
@@ -1042,7 +1070,7 @@
     clearInput();
     player.hurt = true;
     shake = 14;
-    addSplash(player.x, player.y - 20, 90, true);
+    addSplash(player.x, player.y - 20, 90, true, lastStyle);
     sfx.splash();
     const newBest = dodged > best.score;
     if (newBest) { best = { score: dodged, level }; saveBest(best); }
@@ -1119,11 +1147,19 @@
   const easeOutBack = x => 1 + 2.2 * Math.pow(x - 1, 3) + 1.2 * Math.pow(x - 1, 2);
 
   // 巨大ビール瓶（口が (0, -h/2) に来る向きで描き、回転させて注ぐ）
-  function drawGiantBottle(px, py, w, h, angle) {
+  // 瓶の見た目（ビール瓶とワインボトル）
+  const BOTTLE_LOOKS = {
+    bottle: { glass: ['#4a2306', '#8a4610', '#a85a17', '#3d1c05'], lip: '#6b350c', band: '#e9b23a', bandStart: 0.45, bandLen: 0.28,
+              neckLen: 0.24, shoulder: 0.16, label: '#fff4dc', labelBand: '#d9412b', text: 'BEER', textColor: '#3a2410' },
+    winebottle: { glass: ['#0d240f', '#1f4d22', '#2e6b30', '#0a1c0b'], lip: '#5e0b26', band: '#8e1b3a', bandStart: 0, bandLen: 0.7,
+              neckLen: 0.3, shoulder: 0.12, label: '#f6efe0', labelBand: '#8e1b3a', text: 'VINO', textColor: '#5e0b26' },
+  };
+
+  function drawGiantBottle(px, py, w, h, angle, look = BOTTLE_LOOKS.bottle) {
     const top = -h / 2, bottom = h / 2;
     const neckW = w * 0.38;
-    const neckLen = h * 0.24;
-    const shoulder = h * 0.16;
+    const neckLen = h * look.neckLen;
+    const shoulder = h * look.shoulder;
     const bodyTop = top + neckLen + shoulder;
     ctx.save();
     ctx.translate(px, py);
@@ -1143,10 +1179,10 @@
     ctx.lineTo(neckW / 2, top + h * 0.03);
     ctx.closePath();
     const glass = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
-    glass.addColorStop(0, '#4a2306');
-    glass.addColorStop(0.35, '#8a4610');
-    glass.addColorStop(0.6, '#a85a17');
-    glass.addColorStop(1, '#3d1c05');
+    glass.addColorStop(0, look.glass[0]);
+    glass.addColorStop(0.35, look.glass[1]);
+    glass.addColorStop(0.6, look.glass[2]);
+    glass.addColorStop(1, look.glass[3]);
     ctx.fillStyle = glass;
     ctx.fill();
     ctx.strokeStyle = 'rgba(40,18,4,.8)';
@@ -1154,29 +1190,29 @@
     ctx.stroke();
 
     // 口のふち
-    ctx.fillStyle = '#6b350c';
+    ctx.fillStyle = look.lip;
     roundRect(-neckW / 2 - 3, top, neckW + 6, h * 0.045, 3);
     ctx.fill();
-    // 首の金色の帯
-    ctx.fillStyle = '#e9b23a';
-    ctx.fillRect(-neckW / 2, top + neckLen * 0.45, neckW, neckLen * 0.28);
+    // 首の帯
+    ctx.fillStyle = look.band;
+    ctx.fillRect(-neckW / 2, top + neckLen * look.bandStart, neckW, neckLen * look.bandLen);
 
     // ラベル
     const ly = bodyTop + (bottom - bodyTop) * 0.18;
     const lh = (bottom - bodyTop) * 0.5;
-    ctx.fillStyle = '#fff4dc';
+    ctx.fillStyle = look.label;
     ctx.fillRect(-w / 2, ly, w, lh);
-    ctx.fillStyle = '#d9412b';
+    ctx.fillStyle = look.labelBand;
     ctx.fillRect(-w / 2, ly + lh * 0.1, w, lh * 0.14);
     ctx.fillRect(-w / 2, ly + lh * 0.76, w, lh * 0.14);
     ctx.save();
     ctx.translate(0, ly + lh / 2);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillStyle = '#3a2410';
+    ctx.fillStyle = look.textColor;
     ctx.font = `bold ${Math.round(w * 0.34)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('BEER', 0, 0);
+    ctx.fillText(look.text, 0, 0);
     ctx.restore();
 
     // ガラスの光
@@ -1185,6 +1221,145 @@
     ctx.fillRect(-w / 2 + w * 0.14, ly + lh + 4, w * 0.1, bottom - ly - lh - 12);
     ctx.fillRect(-neckW / 2 + neckW * 0.18, top + h * 0.06, neckW * 0.16, neckLen * 0.35);
     ctx.restore();
+  }
+
+  // 酒樽（口が上。ヤマタノオロチ）
+  function drawGiantTaru(px, py, w, h, angle) {
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(angle);
+    const top = -h / 2, bottom = h / 2;
+    // 胴（少しふくらんだ木の樽）
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.44, top);
+    ctx.quadraticCurveTo(-w * 0.56, 0, -w * 0.44, bottom);
+    ctx.lineTo(w * 0.44, bottom);
+    ctx.quadraticCurveTo(w * 0.56, 0, w * 0.44, top);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+    g.addColorStop(0, '#9c6a33');
+    g.addColorStop(0.4, '#d9a35c');
+    g.addColorStop(1, '#8a5a28');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(70,40,15,.8)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    // 板の継ぎ目
+    ctx.strokeStyle = 'rgba(90,55,20,.35)';
+    ctx.lineWidth = 1.5;
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * w * 0.17, top + 2);
+      ctx.quadraticCurveTo(i * w * 0.2, 0, i * w * 0.17, bottom - 2);
+      ctx.stroke();
+    }
+    // たが（輪）
+    ctx.fillStyle = '#3a2a1a';
+    for (const y of [top + h * 0.1, bottom - h * 0.14]) {
+      ctx.fillRect(-w * 0.5, y, w, h * 0.06);
+    }
+    // 口の縁と酒
+    ctx.fillStyle = '#c99a5a';
+    ctx.beginPath();
+    ctx.ellipse(0, top, w * 0.44, h * 0.07, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#d6edf7';
+    ctx.beginPath();
+    ctx.ellipse(0, top, w * 0.38, h * 0.05, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 「酒」の札
+    ctx.fillStyle = '#fffaf0';
+    ctx.beginPath();
+    ctx.arc(0, h * 0.04, w * 0.24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#c8261b';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.font = `bold ${Math.round(w * 0.3)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('酒', 0, h * 0.05);
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
+  }
+
+  // 大徳利（白い焼き物に藍の模様。素戔嗚尊の八塩折の酒）
+  function drawGiantTokkuri(px, py, w, h, angle) {
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(angle);
+    const top = -h / 2, bottom = h / 2;
+    const neckW = w * 0.3;
+    ctx.beginPath();
+    ctx.moveTo(-neckW * 0.8, top);
+    ctx.quadraticCurveTo(-neckW / 2, top + h * 0.06, -neckW / 2, top + h * 0.2);
+    ctx.bezierCurveTo(-neckW / 2, top + h * 0.38, -w / 2, top + h * 0.45, -w / 2, top + h * 0.72);
+    ctx.quadraticCurveTo(-w / 2, bottom, -w * 0.3, bottom);
+    ctx.lineTo(w * 0.3, bottom);
+    ctx.quadraticCurveTo(w / 2, bottom, w / 2, top + h * 0.72);
+    ctx.bezierCurveTo(w / 2, top + h * 0.45, neckW / 2, top + h * 0.38, neckW / 2, top + h * 0.2);
+    ctx.quadraticCurveTo(neckW / 2, top + h * 0.06, neckW * 0.8, top);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+    g.addColorStop(0, '#d8d4c8');
+    g.addColorStop(0.4, '#fbf8f0');
+    g.addColorStop(1, '#c9c4b6');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,60,80,.6)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    // 藍の模様（波と帯）
+    ctx.save();
+    ctx.clip();
+    ctx.strokeStyle = '#2b4c8c';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-w, top + h * 0.28);
+    ctx.lineTo(w, top + h * 0.28);
+    ctx.stroke();
+    ctx.lineWidth = 2.5;
+    for (let row = 0; row < 2; row++) {
+      const y = top + h * (0.8 + row * 0.08);
+      ctx.beginPath();
+      for (let x = -w / 2; x <= w / 2; x += w / 6) {
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(x + w / 12, y - 6, x + w / 6, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+    // 「神酒」の文字
+    ctx.fillStyle = '#2b4c8c';
+    ctx.font = `bold ${Math.round(w * 0.22)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('神', 0, top + h * 0.5);
+    ctx.fillText('酒', 0, top + h * 0.5 + w * 0.24);
+    ctx.textBaseline = 'alphabetic';
+    // 口の縁
+    ctx.fillStyle = '#e9e5da';
+    ctx.beginPath();
+    ctx.ellipse(0, top, neckW * 0.8, h * 0.025, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 範囲攻撃の容器ごとの大きさ（w: 幅, h: 高さ, mouth: 注ぎ口の幅）
+  function pourerSize(pourer, rw) {
+    if (pourer === 'taru') { const w = Math.max(64, Math.min(96, rw * 0.5)); return { w, h: w * 1.15, mouth: w * 0.7 }; }
+    if (pourer === 'tokkuri') { const w = Math.max(46, Math.min(68, rw * 0.38)); return { w, h: w * 2.3, mouth: w * 0.36 }; }
+    if (pourer === 'winebottle') { const w = Math.max(36, Math.min(54, rw * 0.3)); return { w, h: w * 3.1, mouth: w * 0.4 }; }
+    const w = Math.max(38, Math.min(58, rw * 0.32));
+    return { w, h: w * 2.8, mouth: w * 0.42 };
+  }
+
+  function drawPourer(pourer, px, py, w, h, angle) {
+    if (pourer === 'taru') drawGiantTaru(px, py, w, h, angle);
+    else if (pourer === 'tokkuri') drawGiantTokkuri(px, py, w, h, angle);
+    else drawGiantBottle(px, py, w, h, angle, BOTTLE_LOOKS[pourer]);
   }
 
   function drawAreas() {
@@ -1223,13 +1398,14 @@
         }
       }
 
+      const pourer = STYLES[a.style || 'beer'].pourer;
+      const drink = drinkOf(a.style);
       for (const [x1, x2] of a.rects) {
         const rw = x2 - x1;
         const cx = (x1 + x2) / 2;
         // 画面の内側に体が来るように傾ける向きを決める
         const dir = cx < W / 2 ? -1 : 1;
-        const w = Math.max(38, Math.min(58, rw * 0.32));
-        const h = w * 2.8;
+        const { w, h, mouth } = pourerSize(pourer, rw);
         const py = top + 4;
         const px = cx - (h / 2) * Math.sin(dir * POUR_ANGLE);
 
@@ -1255,7 +1431,7 @@
         if (warning) {
           // 傾きはじめると口から泡がこぼれる
           if (Math.abs(angle) > 0.2) {
-            ctx.fillStyle = 'rgba(255,250,235,.9)';
+            ctx.fillStyle = drink.drip;
             for (let i = 0; i < 3; i++) {
               const d = (a.t * 260 + i * 37) % 110;
               ctx.beginPath();
@@ -1268,11 +1444,12 @@
           const k = Math.min(1, (a.t - a.warn) / 0.12);
           const spreadY = Math.min(floor, my + 80);
           const bottom = my + (floor - my) * k;
-          const tw = w * 0.42;
+          const tw = mouth;
           const g = ctx.createLinearGradient(0, my, 0, floor);
-          g.addColorStop(0, 'rgba(249,192,70,.95)');
-          g.addColorStop(1, 'rgba(217,130,11,.95)');
+          g.addColorStop(0, drink.top);
+          g.addColorStop(1, drink.bottom);
           ctx.fillStyle = g;
+          ctx.globalAlpha = 0.95;
           ctx.beginPath();
           ctx.moveTo(mx - tw / 2, my);
           ctx.lineTo(mx + tw / 2, my);
@@ -1289,10 +1466,14 @@
           }
           ctx.closePath();
           ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = drink.edge;
+          ctx.lineWidth = 2;
+          ctx.stroke();
           // 流れのすじ
           ctx.save();
           ctx.clip();
-          ctx.fillStyle = 'rgba(255,250,240,.5)';
+          ctx.fillStyle = drink.streak;
           for (let sx = x1 + 6; sx < x2 - 4; sx += 13) {
             const off = ((a.t * 900) + sx * 7) % 80;
             for (let sy = my - 80 + off; sy < bottom; sy += 80) ctx.fillRect(sx, sy, 3, 30);
@@ -1300,7 +1481,7 @@
           ctx.restore();
           // 床ではねる泡
           if (k >= 1) {
-            ctx.fillStyle = '#fffaf0';
+            ctx.fillStyle = drink.foam;
             for (let fx = x1; fx < x2; fx += 16) {
               ctx.beginPath();
               ctx.arc(fx + 8, floor - 2, 9 + Math.sin(time * 20 + fx) * 3, 0, Math.PI * 2);
@@ -1308,10 +1489,10 @@
             }
           }
         }
-        drawGiantBottle(px, py + enterY, w, h, angle);
+        drawPourer(pourer, px, py + enterY, w, h, angle);
         if (!warning) {
-          // 瓶の口でゴボゴボ泡立つ
-          ctx.fillStyle = '#fffaf0';
+          // 注ぎ口でゴボゴボ泡立つ（ワインや日本酒はしぶき）
+          ctx.fillStyle = drink === DRINKS.beer ? '#fffaf0' : drink.drip;
           for (let i = 0; i < 4; i++) {
             const r = w * 0.14 + Math.sin(time * 25 + i * 1.7) * w * 0.05;
             ctx.beginPath();
@@ -1378,6 +1559,16 @@
     ctx.save();
     ctx.translate(b.x, b.y);
     ctx.rotate(b.rot);
+    const cup = STYLES[b.style || 'beer'].cup;
+    if (cup === 'wineglass') drawWineGlass();
+    else if (cup === 'masu') drawMasu();
+    else if (cup === 'sakazuki') drawSakazuki();
+    else drawMug();
+    ctx.restore();
+  }
+
+  // ビールジョッキ
+  function drawMug() {
     ctx.strokeStyle = 'rgba(255,255,255,.85)';
     ctx.lineWidth = 4;
     ctx.beginPath();
@@ -1401,7 +1592,117 @@
     ctx.fillRect(-12, -10, 24, 4);
     ctx.fillStyle = 'rgba(255,255,255,.6)';
     ctx.fillRect(-8, -4, 3, 16);
+  }
+
+  // ワイングラス（赤ワイン）
+  function drawWineGlass() {
+    // 脚と台
+    ctx.fillStyle = 'rgba(255,255,255,.75)';
+    ctx.fillRect(-1.5, 3, 3, 11);
+    ctx.beginPath();
+    ctx.ellipse(0, 15, 10, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // ボウル
+    ctx.beginPath();
+    ctx.moveTo(-12, -17);
+    ctx.lineTo(12, -17);
+    ctx.bezierCurveTo(13, -4, 8, 4, 0, 4);
+    ctx.bezierCurveTo(-8, 4, -13, -4, -12, -17);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255,255,255,.5)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.9)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // ワイン
+    ctx.save();
+    ctx.clip();
+    const g = ctx.createLinearGradient(0, -8, 0, 4);
+    g.addColorStop(0, '#b3264f');
+    g.addColorStop(1, '#5e0b26');
+    ctx.fillStyle = g;
+    ctx.fillRect(-14, -8, 28, 14);
     ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,.6)';
+    ctx.fillRect(-8, -14, 2.5, 10);
+  }
+
+  // 升（木の四角い器に日本酒）
+  function drawMasu() {
+    // 上の面（酒が見える）
+    ctx.fillStyle = '#f3d9a4';
+    ctx.beginPath();
+    ctx.moveTo(-14, -8); ctx.lineTo(14, -8); ctx.lineTo(10, -16); ctx.lineTo(-10, -16);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#d6edf7';
+    ctx.beginPath();
+    ctx.moveTo(-11, -9.5); ctx.lineTo(11, -9.5); ctx.lineTo(8, -14.5); ctx.lineTo(-8, -14.5);
+    ctx.closePath();
+    ctx.fill();
+    // 前の面
+    const g = ctx.createLinearGradient(-14, 0, 14, 0);
+    g.addColorStop(0, '#d9ad6b');
+    g.addColorStop(1, '#c3914f');
+    ctx.fillStyle = g;
+    ctx.fillRect(-14, -8, 28, 24);
+    // 木目
+    ctx.strokeStyle = 'rgba(120,80,40,.35)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-14, -2 + i * 7);
+      ctx.quadraticCurveTo(0, 1 + i * 7, 14, -2 + i * 7);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(90,55,20,.7)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-14, -8, 28, 24);
+    // 焼き印の「酒」
+    ctx.fillStyle = 'rgba(90,40,10,.8)';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('酒', 0, 5);
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  // 朱塗りの盃
+  function drawSakazuki() {
+    // 外側（朱色）
+    ctx.fillStyle = '#c8261b';
+    ctx.beginPath();
+    ctx.ellipse(0, -4, 17, 7, 0, 0, Math.PI);
+    ctx.bezierCurveTo(-12, 10, 12, 10, 17, -4);
+    ctx.fill();
+    // 高台（足）
+    ctx.fillStyle = '#9e1b12';
+    ctx.fillRect(-6, 7, 12, 5);
+    ctx.beginPath();
+    ctx.ellipse(0, 12, 7, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // ふち（金）と酒
+    ctx.fillStyle = '#e8b33a';
+    ctx.beginPath();
+    ctx.ellipse(0, -4, 17, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#c8261b';
+    ctx.beginPath();
+    ctx.ellipse(0, -4, 15, 5.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#e3f3fa';
+    ctx.beginPath();
+    ctx.ellipse(0, -3.5, 12.5, 4.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.8)';
+    ctx.beginPath();
+    ctx.ellipse(-4, -5, 4, 1.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 金の「寿」
+    ctx.fillStyle = '#e8b33a';
+    ctx.font = 'bold 8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('寿', 0, 7);
   }
 
   function drawPlayer() {
@@ -1479,7 +1780,7 @@
       ctx.arc(3, -43, 9, 0, Math.PI * 2);
       ctx.arc(12, -38, 7, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = 'rgba(242,165,22,.55)';
+      ctx.fillStyle = `rgba(${drinkOf(lastStyle).rgb},.55)`;
       for (let i = 0; i < 4; i++) {
         const dy = ((endTimer * 40 + i * 13) % 40);
         ctx.fillRect(-12 + i * 8, -14 + dy, 3, 6);
@@ -1491,7 +1792,8 @@
   function drawParticles() {
     for (const p of particles) {
       ctx.globalAlpha = Math.max(0, Math.min(1, p.life / p.max * 1.5));
-      ctx.fillStyle = p.foam ? '#fffaf0' : '#f2a516';
+      const d = DRINKS[p.d || 'beer'];
+      ctx.fillStyle = p.foam ? d.foam : d.liquid;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
@@ -1578,7 +1880,7 @@
     drawParticles();
     if (state !== 'title') drawHUD();
     if (state === 'over' && endTimer < 0.5) {
-      ctx.fillStyle = `rgba(242,165,22,${0.5 * (1 - endTimer / 0.5)})`;
+      ctx.fillStyle = `rgba(${drinkOf(lastStyle).rgb},${0.5 * (1 - endTimer / 0.5)})`;
       ctx.fillRect(-40, -40, W + 80, H + 80);
     }
     ctx.restore();
