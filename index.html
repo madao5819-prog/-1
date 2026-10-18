@@ -255,7 +255,7 @@
   let H = 640;
   // レベルアップに必要な杯数。Lv.1・2 はすぐ越えられるように少なく、そこから先は
   // 飛んでくる量（間隔・方向の数・人数）に合わせて、どのレベルも5秒前後で進むようにしている
-  const LEVEL_SIZES = [2, 3, 6, 8, 8, 14, 18, 20, 22, 24, 26, 30, 34, 38, 48, 54, 60];
+  const LEVEL_SIZES = [2, 3, 6, 8, 8, 14, 18, 20, 20, 22, 24, 26, 28, 30, 48, 54, 60];
   const levelSize = L => LEVEL_SIZES[Math.min(L, LEVEL_SIZES.length) - 1];
   // 画面上部のレイアウト（顔を小さくして盤面を広く）
   const BOSS_Y = 66, BOSS_R = 40;
@@ -471,16 +471,21 @@
     if (L <= 8) return 515 + (L - 5) * 25;         // Lv.8 で 590
     return 590 + (980 - 590) * Math.min(1, (L - 8) / (LAST - 8)); // Lv.17 で 980
   }
+  // 投げる間隔（秒）。神様エリア（Lv.15〜）より前はゆっくりめ、神様エリアで一気に速くなる
+  const INTERVALS = { 5: 0.7, 6: 0.75, 7: 0.72, 8: 0.69, 9: 0.66, 10: 0.63, 11: 0.6, 12: 0.58, 13: 0.56, 14: 0.54,
+                      15: 0.24, 16: 0.2, 17: 0.16 };
+  const GOD_LEVEL = 15;
   function params(L, inLevel) {
     return {
       speed: Math.min(980, baseSpeed(L) + Math.min(inLevel, 10) * 4),
-      interval: L <= 5 ? 1.3 - L * 0.13 : ramp(L, 0.65, 0.16),
-      fan: L >= 15 ? 5
-         : L >= 12 ? (Math.random() < 0.5 ? 3 : 5)
+      interval: L <= 4 ? 1.3 - L * 0.13 : INTERVALS[Math.min(L, LAST)],
+      fan: L >= GOD_LEVEL ? 5
+         : L >= 12 ? (Math.random() < 0.3 ? 5 : 3)
          : L >= 5 ? 3
          : L >= 3 ? (Math.random() < 0.5 ? 1 : 2)
          : 1,
-      lead: L <= 5 ? 0.12 * (L - 1) : ramp(L, 0.48, 0.9),
+      // 先読みして狙う確率。神様エリアより前は 0.7 まで、神様エリアで 0.8〜0.9
+      lead: L <= 5 ? 0.12 * (L - 1) : L < GOD_LEVEL ? 0.48 + (L - 5) * 0.025 : ramp(L, 0.48, 0.9),
       bossSpeed: 70 + L * 20,
       areaInterval: Math.max(3.2, 8 - L * 0.5),
       warn: Math.max(0.75, 1.3 - L * 0.06),
