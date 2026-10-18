@@ -232,9 +232,10 @@
 (() => {
   const W = 400;
   let H = 640;
-  // レベルアップに必要な杯数：Lv.1 は5杯、Lv.2 は7杯、Lv.3〜8 は10杯。
-  // Lv.9 からは15杯、そこから1レベルごとに3杯ずつ増える（後半の名前をじっくり味わえるように）
-  const levelSize = L => L === 1 ? 5 : L === 2 ? 7 : L <= 8 ? 10 : 15 + (L - 9) * 3;
+  // レベルアップに必要な杯数。2人が5方向に投げてくる後半は、1回で最大10杯よけることになるので、
+  // 「5回くらいよけたら次のステージ」になるように多めにする（Lv.9 以降は各50杯）
+  const LEVEL_SIZES = [5, 7, 10, 10, 10, 20, 30, 40];
+  const levelSize = L => LEVEL_SIZES[L - 1] || 50;
   // 画面上部のレイアウト（顔を小さくして盤面を広く）
   const BOSS_Y = 66, BOSS_R = 40;
   const HUD_Y = 122;
@@ -330,8 +331,8 @@
     },
     { // Lv.14 酒呑童子
       throw: ['酒をもてい！', '鬼の一杯', '酒呑童子参上', '百杯目だ', '宴は終わらぬ'],
-      area: ['鬼の酒樽！', '神の一杯！'],
-      gap: ['鬼から逃げろ', '奇跡を見せろ'],
+      area: ['鬼の瓢箪！', 'にごり酒の滝！'],
+      gap: ['鬼から逃げろ', '大江山へ逃げろ'],
       intro: ['鬼が来たぞ…'],
     },
     { // Lv.15 バッカス
@@ -359,19 +360,23 @@
             drip: 'rgba(255,250,235,.9)', streak: 'rgba(255,250,240,.5)', edge: 'rgba(180,110,10,.4)' },
     wine: { name: 'ワイン', liquid: '#9b1d42', foam: '#e07a98', top: '#b3264f', bottom: '#5e0b26', rgb: '155,29,66',
             drip: 'rgba(155,29,66,.9)', streak: 'rgba(255,180,200,.3)', edge: 'rgba(60,0,20,.5)' },
+    nigori: { name: 'にごり酒', liquid: '#efe9da', foam: '#ffffff', top: '#fbf8f0', bottom: '#d8cfb8', rgb: '230,222,200',
+            drip: 'rgba(245,240,228,.95)', streak: 'rgba(255,255,255,.6)', edge: 'rgba(140,120,90,.6)' },
     sake: { name: '日本酒', liquid: '#bfe0ef', foam: '#ffffff', top: '#f2fbff', bottom: '#a3cde2', rgb: '150,200,225',
             drip: 'rgba(205,232,245,.95)', streak: 'rgba(255,255,255,.8)', edge: 'rgba(80,130,160,.7)' },
   };
   // レベルごとの「投げてくる器」と「範囲攻撃で注いでくる容器」
   const STYLES = {
     beer:    { drink: 'beer', cup: 'mug',       pourer: 'bottle' },     // ジョッキとビール瓶
+    shuten:  { drink: 'nigori', cup: 'choko',   pourer: 'hyotan' },     // 酒呑童子：お猪口と大瓢箪（にごり酒）
     bacchus: { drink: 'wine', cup: 'wineglass', pourer: 'winebottle' }, // バッカス：ワイングラスとワインボトル
     orochi:  { drink: 'sake', cup: 'masu',      pourer: 'taru' },       // ヤマタノオロチ：升と酒樽
     susanoo: { drink: 'sake', cup: 'sakazuki',  pourer: 'tokkuri' },    // 素戔嗚尊：朱塗りの盃と大徳利（八塩折の酒）
   };
   function styleFor(L) {
     const name = levelName(L);
-    return name === '素戔嗚尊' ? 'susanoo' : name === 'ヤマタノオロチ' ? 'orochi' : name === 'バッカス' ? 'bacchus' : 'beer';
+    return name === '素戔嗚尊' ? 'susanoo' : name === 'ヤマタノオロチ' ? 'orochi' : name === 'バッカス' ? 'bacchus'
+      : name === '酒呑童子' ? 'shuten' : 'beer';
   }
   const drinkOf = style => DRINKS[STYLES[style || 'beer'].drink];
 
@@ -1142,6 +1147,7 @@
 
   // 神様エリアの背景（バッカス：ワイン色の夜／オロチ：暗い沼／素戔嗚尊：嵐の夜）
   const BG_THEMES = {
+    shuten:  { top: [36, 8, 10], bottom: [76, 20, 16], floor: [62, 34, 26] },
     bacchus: { top: [46, 12, 36], bottom: [88, 26, 58], floor: [70, 36, 52] },
     orochi:  { top: [10, 30, 24], bottom: [34, 56, 42], floor: [52, 52, 34] },
     susanoo: { top: [10, 14, 40], bottom: [32, 36, 74], floor: [40, 40, 64] },
@@ -1447,8 +1453,66 @@
     ctx.restore();
   }
 
+  // 大瓢箪（口が上。酒呑童子のにごり酒）
+  function drawGiantHyotan(px, py, w, h, angle) {
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(angle);
+    const top = -h / 2;
+    const r1 = w * 0.32, c1 = top + h * 0.3;
+    const r2 = w * 0.5, c2 = top + h * 0.74;
+    const g = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+    g.addColorStop(0, '#9c5a14');
+    g.addColorStop(0.4, '#e3a046');
+    g.addColorStop(1, '#8a4c10');
+    ctx.fillStyle = g;
+    ctx.strokeStyle = 'rgba(70,35,5,.8)';
+    ctx.lineWidth = 2.5;
+    // 注ぎ口
+    ctx.fillRect(-w * 0.09, top, w * 0.18, h * 0.12);
+    ctx.strokeRect(-w * 0.09, top, w * 0.18, h * 0.12);
+    // 上と下のふくらみ
+    ctx.beginPath();
+    ctx.arc(0, c1, r1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, c2, r2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillRect(-r1 * 0.6, c1, r1 * 1.2, c2 - c1);
+    // 腰の赤い紐とふさ
+    ctx.fillStyle = '#c8261b';
+    ctx.fillRect(-r1 * 0.75, top + h * 0.5 - 4, r1 * 1.5, 8);
+    ctx.strokeStyle = '#c8261b';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(r1 * 0.6, top + h * 0.5);
+    ctx.quadraticCurveTo(r1 * 1.4, top + h * 0.56, r1 * 1.1, top + h * 0.66);
+    ctx.stroke();
+    // 「鬼」の文字
+    ctx.fillStyle = '#1a1a1a';
+    ctx.font = `bold ${Math.round(w * 0.38)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('鬼', 0, c2 + 2);
+    ctx.textBaseline = 'alphabetic';
+    // 光
+    ctx.fillStyle = 'rgba(255,255,255,.3)';
+    ctx.beginPath();
+    ctx.ellipse(-r2 * 0.45, c2 - r2 * 0.3, r2 * 0.14, r2 * 0.35, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // 口
+    ctx.fillStyle = '#4a2a08';
+    ctx.beginPath();
+    ctx.ellipse(0, top, w * 0.09, h * 0.015, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   // 範囲攻撃の容器ごとの大きさ（w: 幅, h: 高さ, mouth: 注ぎ口の幅）
   function pourerSize(pourer, rw) {
+    if (pourer === 'hyotan') { const w = Math.max(54, Math.min(78, rw * 0.42)); return { w, h: w * 1.9, mouth: w * 0.2 }; }
     if (pourer === 'taru') { const w = Math.max(64, Math.min(96, rw * 0.5)); return { w, h: w * 1.15, mouth: w * 0.7 }; }
     if (pourer === 'tokkuri') { const w = Math.max(46, Math.min(68, rw * 0.38)); return { w, h: w * 2.3, mouth: w * 0.36 }; }
     if (pourer === 'winebottle') { const w = Math.max(36, Math.min(54, rw * 0.3)); return { w, h: w * 3.1, mouth: w * 0.4 }; }
@@ -1459,6 +1523,7 @@
   function drawPourer(pourer, px, py, w, h, angle) {
     if (pourer === 'taru') drawGiantTaru(px, py, w, h, angle);
     else if (pourer === 'tokkuri') drawGiantTokkuri(px, py, w, h, angle);
+    else if (pourer === 'hyotan') drawGiantHyotan(px, py, w, h, angle);
     else drawGiantBottle(px, py, w, h, angle, BOTTLE_LOOKS[pourer]);
   }
 
@@ -1610,6 +1675,139 @@
     }
   }
 
+  // 酒呑童子から先は、写真の枠をステージにちなんだ飾りにする
+  const FRAME_COLORS = { shuten: '#b3201a', bacchus: '#e8b33a', orochi: '#2f6b3a', susanoo: '#e8b33a' };
+
+  function drawFrameDeco(style, x, y, r) {
+    if (style === 'shuten') {
+      // 鬼の角が2本
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#4a2a10';
+      for (const a of [-2.2, -0.94]) {
+        ctx.save();
+        ctx.translate(x + Math.cos(a) * (r - 2), y + Math.sin(a) * (r - 2));
+        ctx.rotate(a + Math.PI / 2);
+        const lean = a < -1.57 ? -1 : 1;
+        ctx.beginPath();
+        ctx.moveTo(-8, 4);
+        ctx.quadraticCurveTo(-6, -14, lean * 4, -26);
+        ctx.quadraticCurveTo(6, -12, 8, 4);
+        ctx.closePath();
+        const g = ctx.createLinearGradient(0, 4, 0, -26);
+        g.addColorStop(0, '#f6ead0');
+        g.addColorStop(1, '#d8b878');
+        ctx.fillStyle = g;
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+      // 外側の黒い輪
+      ctx.strokeStyle = '#1a0606';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, r + 3, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (style === 'bacchus') {
+      // ぶどうのつると房
+      for (let i = 0; i < 16; i++) {
+        const a = i / 16 * Math.PI * 2;
+        ctx.save();
+        ctx.translate(x + Math.cos(a) * (r + 3), y + Math.sin(a) * (r + 3));
+        ctx.rotate(a + Math.PI / 2 + (i % 2 ? 0.5 : -0.5));
+        ctx.fillStyle = i % 2 ? '#4f8a2b' : '#6aa83a';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 7, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      for (const a of [0.75, 2.4, -1.57]) {
+        const gx = x + Math.cos(a) * (r + 8), gy = y + Math.sin(a) * (r + 8);
+        ctx.fillStyle = '#6b2a7a';
+        for (const [dx, dy] of [[-5, -4], [0, -4], [5, -4], [-2.5, 0], [2.5, 0], [0, 4]]) {
+          ctx.beginPath();
+          ctx.arc(gx + dx, gy + dy, 3.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = 'rgba(255,255,255,.35)';
+        ctx.beginPath();
+        ctx.arc(gx - 1, gy - 5, 1.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (style === 'orochi') {
+      // うろこの太い輪と、外を向いた8つの蛇の頭
+      ctx.strokeStyle = '#2f6b3a';
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.arc(x, y, r + 3, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(160,220,140,.6)';
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < 28; i++) {
+        const a = i / 28 * Math.PI * 2;
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(a) * (r + 3), y + Math.sin(a) * (r + 3), 3, a - 1.2, a + 1.2);
+        ctx.stroke();
+      }
+      for (let i = 0; i < 8; i++) {
+        const a = i / 8 * Math.PI * 2 - Math.PI / 2 + Math.sin(time * 3 + i) * 0.06;
+        ctx.save();
+        ctx.translate(x + Math.cos(a) * (r + 12), y + Math.sin(a) * (r + 12));
+        ctx.rotate(a);
+        // 舌
+        ctx.strokeStyle = '#d9412b';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(6, 0); ctx.lineTo(11, 0); ctx.lineTo(13, -2); ctx.moveTo(11, 0); ctx.lineTo(13, 2);
+        ctx.stroke();
+        // 頭
+        ctx.fillStyle = '#3f7f3a';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 7, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffd34d';
+        ctx.beginPath();
+        ctx.arc(2, -2.5, 1.6, 0, Math.PI * 2);
+        ctx.arc(2, 2.5, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    } else if (style === 'susanoo') {
+      // 金の二重の輪、稲妻、雲
+      ctx.strokeStyle = '#e8b33a';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, r + 5, 0, Math.PI * 2);
+      ctx.stroke();
+      const flick = 0.7 + 0.3 * Math.abs(Math.sin(time * 9));
+      for (const a of [-2.4, -0.75, -1.57]) {
+        ctx.save();
+        ctx.translate(x + Math.cos(a) * (r + 4), y + Math.sin(a) * (r + 4));
+        ctx.rotate(a);
+        ctx.globalAlpha = flick;
+        ctx.beginPath();
+        ctx.moveTo(0, -3); ctx.lineTo(10, -5); ctx.lineTo(8, 0); ctx.lineTo(20, -2);
+        ctx.lineTo(9, 4); ctx.lineTo(11, 0); ctx.lineTo(0, 3);
+        ctx.closePath();
+        ctx.fillStyle = '#ffe066';
+        ctx.fill();
+        ctx.strokeStyle = '#a06e14';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = 'rgba(235,240,255,.95)';
+      for (const side of [-1, 1]) {
+        const cx = x + side * (r + 2), cy = y + r * 0.55;
+        for (const [dx, dy, rr] of [[0, 0, 9], [side * 9, 4, 7], [-side * 7, 6, 6], [side * 3, 8, 6]]) {
+          ctx.beginPath();
+          ctx.arc(cx + dx, cy + dy, rr, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+
   function drawBoss(boss) {
     const wob = Math.sin(time * 6 + boss.x * 0.01) * 3;
     const wind = boss.windup > 0 ? Math.sin(boss.windup * 60) * 4 : 0;
@@ -1631,11 +1829,13 @@
       ctx.drawImage(faceImg, x - boss.r, y - boss.r, boss.r * 2, boss.r * 2);
     }
     ctx.restore();
+    const style = state === 'title' ? 'beer' : styleFor(level);
     ctx.lineWidth = 4;
-    ctx.strokeStyle = '#f2a516';
+    ctx.strokeStyle = FRAME_COLORS[style] || '#f2a516';
     ctx.beginPath();
     ctx.arc(x, y, boss.r, 0, Math.PI * 2);
     ctx.stroke();
+    drawFrameDeco(style, x, y, boss.r);
 
     if (boss.shoutLife > 0 && state === 'play') {
       // 画面の内側に向けて表示し、長いセリフは文字を小さくして収める
@@ -1663,6 +1863,7 @@
     if (cup === 'wineglass') drawWineGlass();
     else if (cup === 'masu') drawMasu();
     else if (cup === 'sakazuki') drawSakazuki();
+    else if (cup === 'choko') drawChoko();
     else drawMug();
     ctx.restore();
   }
@@ -1765,6 +1966,42 @@
     ctx.textBaseline = 'middle';
     ctx.fillText('酒', 0, 5);
     ctx.textBaseline = 'alphabetic';
+  }
+
+  // お猪口（にごり酒）
+  function drawChoko() {
+    ctx.beginPath();
+    ctx.moveTo(-12, -9);
+    ctx.lineTo(12, -9);
+    ctx.quadraticCurveTo(12, 8, 6, 13);
+    ctx.lineTo(-6, 13);
+    ctx.quadraticCurveTo(-12, 8, -12, -9);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(-12, 0, 12, 0);
+    g.addColorStop(0, '#d9d5ca');
+    g.addColorStop(0.45, '#fffdf6');
+    g.addColorStop(1, '#cbc6b8');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,60,80,.5)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.fillStyle = '#2b4c8c';
+    ctx.fillRect(-11.5, -4, 23, 2.5);
+    ctx.fillRect(-9, 8, 18, 2);
+    ctx.fillStyle = '#c8261b';
+    ctx.font = 'bold 9px serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('鬼', 0, 6);
+    // 口とにごり酒
+    ctx.fillStyle = '#fffdf6';
+    ctx.beginPath();
+    ctx.ellipse(0, -9, 12, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ece5d3';
+    ctx.beginPath();
+    ctx.ellipse(0, -8.5, 10, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   // 朱塗りの盃
