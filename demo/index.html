@@ -738,6 +738,8 @@
   // ---------- スコア・レベル ----------
   const AREA_BONUS = 3;
   const SLIP_BONUS = 2;
+  // 3方向・5方向を全部よけきったときのボーナス
+  const VOLLEY_BONUS = { 3: 2, 5: 5 };
   function addDodge(text, x, y, n = 1, big = false, color) {
     dodged += n;
     popups.push({ x, y, text, life: big ? 1.1 : 0.7, size: big ? 24 : 16, color: color || (big ? '#e08a00' : undefined) });
@@ -944,7 +946,7 @@
     }
 
     const vid = ++volleyId;
-    volleys.set(vid, { n: xs.length, left: false, right: false });
+    volleys.set(vid, { n: xs.length, fan: p.fan, left: false, right: false });
     for (const lx of xs) {
       const d = Math.hypot(lx - sx, dy);
       beers.push({
@@ -1177,13 +1179,21 @@
         if (passed) addSplash(b.x, H - 14, 8, false, b.style);
         addDodge('よけた！', player.x, player.y - 50);
         if (state !== 'play') return;
-        // 同じ投げのビールが全部通り過ぎたとき、左右両方を通っていたら「すり抜け」
+        // 同じ投げのビールが全部通り過ぎたとき：
+        //   左右両方を通っていたら「すり抜け」、3方向・5方向なら「よけきり」ボーナス
         const v = volleys.get(b.vid);
         if (v && --v.n === 0) {
           volleys.delete(b.vid);
-          if (v.left && v.right) {
-            sfx.slip();
-            addDodge(`すり抜け！ +${SLIP_BONUS}`, Math.max(90, Math.min(W - 90, player.x)), player.y - 95, SLIP_BONUS, true, '#2e9e4f');
+          const slip = v.left && v.right;
+          const volley = VOLLEY_BONUS[v.fan] || 0;
+          if (slip || volley) {
+            const parts = [];
+            if (slip) parts.push('すり抜け');
+            if (volley) parts.push(`${v.fan}連よけ`);
+            const pts = (slip ? SLIP_BONUS : 0) + volley;
+            if (slip) sfx.slip(); else sfx.area();
+            addDodge(`${parts.join('＋')}！ +${pts}`, Math.max(100, Math.min(W - 100, player.x)), player.y - 95, pts, true,
+              slip ? '#2e9e4f' : '#e08a00');
             if (state !== 'play') return;
           }
         }
