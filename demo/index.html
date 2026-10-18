@@ -129,6 +129,17 @@
   .faceTools { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
   .faceTools button { min-width: 0 !important; margin-top: 0 !important; }
   #cropScreen, #lockScreen { background: var(--bg); z-index: 25; }
+  /* クリア画面：紙吹雪がひらひら舞う */
+  #clearScreen {
+    z-index: 26;
+    background: radial-gradient(circle at 50% 35%, #5a3a12 0%, #2b1a0e 70%);
+  }
+  #clearScreen > * { margin-top: 0; margin-bottom: 0; position: relative; z-index: 1; }
+  #clearScreen > #confetti { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+  #clearScreen .congrats { font-size: clamp(28px, 9vw, 44px); white-space: nowrap; color: #ffd34d; animation: pop 1.2s ease-in-out infinite alternate; }
+  #clearScreen .clearLead { font-size: 20px; }
+  #clearScreen .face { border-color: #ffd34d; box-shadow: 0 0 30px rgba(255,211,77,.6); }
+  @keyframes pop { from { transform: scale(1); } to { transform: scale(1.08); } }
   #cropCanvas { border-radius: 50%; border: 5px solid var(--accent); touch-action: none; background: #222; }
   #cropZoom { width: 230px; accent-color: var(--accent); }
   .overlay input[type=text] {
@@ -221,6 +232,16 @@
   <p id="endText"></p>
   <button id="retryBtn">もう一回</button>
   <button class="sub" id="titleBtn">タイトルへ</button>
+</div>
+
+<div class="overlay hidden" id="clearScreen">
+  <canvas id="confetti"></canvas>
+  <img class="face" src="oyaji.png" alt="">
+  <h1 class="congrats">🎉 おめでとう！ 🎉</h1>
+  <p class="clearLead">素戔嗚尊を超えて<br><b>全制覇</b>しました！</p>
+  <p id="clearText"></p>
+  <button id="continueBtn">無限の宴へ（続ける）</button>
+  <button class="sub" id="clearTitleBtn">タイトルへ</button>
 </div>
 
 <div class="overlay" id="rotate">
@@ -685,7 +706,7 @@
   }
 
   function setPaused(p) {
-    if (state !== 'play') return;
+    if (state !== 'play' || !clearScreen.classList.contains('hidden')) return;
     paused = p;
     pauseScreen.classList.toggle('hidden', !p);
     if (!p) unlockAudio();
@@ -718,24 +739,104 @@
     levelPause = 2;
     throwTimer = Math.max(throwTimer, 2);
     areaTimer = Math.max(areaTimer, 3);
-    banner = { text: '全制覇！ 素戔嗚尊を超えた！', life: 2.6, max: 2.6 };
-    popups.push({ x: W / 2, y: H * 0.45, text: '🎉 全制覇！ 🎉', life: 2.2, size: 34, color: '#e8b33a' });
-    popups.push({ x: W / 2, y: H * 0.45 + 40, text: 'ここからは無限の宴…', life: 2.2, size: 18, color: '#d9412b' });
     for (const b of bosses) say(b, '見事なり…', 2);
-    for (let k = 0; k < 120; k++) {
-      const a = Math.random() * Math.PI * 2;
-      const sp = 150 + Math.random() * 350;
-      particles.push({
-        x: W / 2, y: H * 0.4, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 200,
-        life: 1 + Math.random(), max: 2, r: 2 + Math.random() * 4,
-        color: ['#e8b33a', '#fff7e6', '#d9412b', '#7cc4ff'][k % 4],
-      });
-    }
     sfx.clear();
     best.cleared = true;
     best.clears = (best.clears || 0) + 1;
+    if (dodged > best.score) { best.score = dodged; best.level = level; }
     saveBest(best);
+    showClearScreen();
   }
+
+  // ---------- クリア画面 ----------
+  const clearScreen = $('clearScreen');
+  const confettiCv = $('confetti');
+  const confettiCtx = confettiCv.getContext('2d');
+  let confetti = [], confettiOn = false, confettiLast = 0;
+  const CONFETTI_COLORS = ['#ffd34d', '#d9412b', '#fff7e6', '#7cc4ff', '#6ad18a', '#ff8fc8', '#e8b33a'];
+
+  function newPiece(cw, ch, anywhere) {
+    return {
+      x: Math.random() * cw,
+      y: anywhere ? Math.random() * ch : -20 - Math.random() * ch * 0.3,
+      w: 6 + Math.random() * 7,
+      h: 9 + Math.random() * 9,
+      color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+      vy: 45 + Math.random() * 70,          // ゆっくり落ちる
+      sway: 0.8 + Math.random() * 1.6,       // 左右にゆれる速さ
+      swayAmp: 25 + Math.random() * 45,
+      phase: Math.random() * Math.PI * 2,
+      rot: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 4,
+      flip: 2 + Math.random() * 5,           // くるくる裏返る速さ
+    };
+  }
+
+  function confettiFrame(now) {
+    if (!confettiOn) return;
+    const dt = Math.min(0.05, (now - confettiLast) / 1000 || 0);
+    confettiLast = now;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cw = window.innerWidth, ch = window.innerHeight;
+    if (confettiCv.width !== Math.round(cw * dpr) || confettiCv.height !== Math.round(ch * dpr)) {
+      confettiCv.width = Math.round(cw * dpr);
+      confettiCv.height = Math.round(ch * dpr);
+    }
+    const c = confettiCtx;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, cw, ch);
+    const t = now / 1000;
+    for (const p of confetti) {
+      p.y += p.vy * dt;
+      p.rot += p.vr * dt;
+      if (p.y > ch + 20) Object.assign(p, newPiece(cw, ch, false), { y: -20 });
+      const x = p.x + Math.sin(t * p.sway + p.phase) * p.swayAmp;
+      c.save();
+      c.translate(x, p.y);
+      c.rotate(p.rot + Math.sin(t * p.sway + p.phase) * 0.6);
+      c.scale(1, Math.cos(t * p.flip + p.phase));
+      c.fillStyle = p.color;
+      c.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      c.restore();
+    }
+    requestAnimationFrame(confettiFrame);
+  }
+
+  function showClearScreen() {
+    paused = true;
+    pauseBtn.classList.remove('show');
+    clearInput();
+    $('clearText').innerHTML =
+      `よけた数：<b>${dodged}</b> 杯<br>` +
+      `<span class="small">全制覇 ${best.clears} 回目</span>`;
+    clearScreen.classList.remove('hidden');
+    const cw = window.innerWidth, ch = window.innerHeight;
+    confetti = Array.from({ length: 140 }, () => newPiece(cw, ch, true));
+    confettiOn = true;
+    confettiLast = performance.now();
+    requestAnimationFrame(confettiFrame);
+    vibrate([60, 40, 60, 40, 200]);
+  }
+
+  function hideClearScreen() {
+    confettiOn = false;
+    clearScreen.classList.add('hidden');
+  }
+
+  $('continueBtn').addEventListener('click', () => {
+    hideClearScreen();
+    unlockAudio();
+    paused = false;
+    pauseBtn.classList.add('show');
+    levelPause = 1.5;
+    throwTimer = Math.max(throwTimer, 1.5);
+    areaTimer = Math.max(areaTimer, 3);
+    banner = { text: '無限の宴、開幕！', life: 1.6, max: 1.6 };
+  });
+  $('clearTitleBtn').addEventListener('click', () => {
+    hideClearScreen();
+    toTitle();
+  });
 
   function levelUp(L) {
     if (CFG.maxLevel && L > CFG.maxLevel) { demoEnd(); return; }
