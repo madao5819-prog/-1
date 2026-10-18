@@ -257,7 +257,7 @@
   let H = 640;
   // レベルアップに必要な杯数。Lv.1・2 はすぐ越えられるように少なく、そこから先は
   // 飛んでくる量（間隔・方向の数・人数）に合わせて、どのレベルも5秒前後で進むようにしている
-  const LEVEL_SIZES = [2, 3, 6, 8, 8, 14, 18, 20, 22, 24, 26, 50, 55, 60, 80, 90, 100];
+  const LEVEL_SIZES = [2, 3, 6, 8, 8, 14, 18, 20, 22, 24, 26, 30, 34, 38, 48, 54, 60];
   const levelSize = L => LEVEL_SIZES[Math.min(L, LEVEL_SIZES.length) - 1];
   // 画面上部のレイアウト（顔を小さくして盤面を広く）
   const BOSS_Y = 66, BOSS_R = 40;
@@ -879,7 +879,7 @@
     // 複数投げるときは、角度を考えて「人が入れるすき間」が必ずできる間隔で並べる。
     // 端から斜めに投げたビールは横に流れるぶん、間隔を広く取る（等間隔にはならない）。
     // 通れるすき間の幅。2方向がいちばん広く、3方向はそれより少し狭く、5方向は狭め
-    const GAP = p.fan >= 5 ? 52 : p.fan === 3 ? 90 : 130;
+    const GAP = p.fan >= 5 ? 66 : p.fan === 3 ? 90 : 130;
     const dy = player.y - sy;
     const zoneOf = lx => dangerZone(lx, (lx - sx) / dy);
     function layout(center) {
@@ -1037,9 +1037,9 @@
     }
   }
 
-  // 当たり判定は見た目より少し小さめ（ビール 18x24、人 34x56 の7〜8割）
-  const HIT_HW = (18 + 34 * 0.7) / 2;
-  const HIT_HH = (24 + 56 * 0.85) / 2;
+  // 当たり判定は見た目より小さめ（ビール 18x24、人 34x56 の6〜7.5割）
+  const HIT_HW = (18 + 34 * 0.6) / 2;
+  const HIT_HH = (24 + 56 * 0.75) / 2;
   function rectHit(b) {
     return Math.abs(b.x - player.x) < HIT_HW &&
            Math.abs(b.y - (player.y - 4)) < HIT_HH;
